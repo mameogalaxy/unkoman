@@ -17,6 +17,7 @@
   const statusEl = $("status");
 
   const onionCanvas = $("onion");
+  const captionOverlay = $("captionOverlay");
 
   const startCamBtn = $("startCam");
   const recordBtn = $("recordBtn");
@@ -31,6 +32,7 @@
   const fpsLabel = $("fpsLabel");
   const cameraSelect = $("cameraSelect");
   const showTimestamp = $("showTimestamp");
+  const captionText = $("captionText");
   const playDirection = $("playDirection");
   const onionSkin = $("onionSkin");
   const onionOpacity = $("onionOpacity");
@@ -114,6 +116,60 @@
     const ctx = onionCanvas.getContext("2d");
     ctx.clearRect(0, 0, frameW, frameH);
     ctx.drawImage(last.bitmap, 0, 0, frameW, frameH);
+  }
+
+  // ---- キャプション（佐藤。風の白文字） ----
+  // 入力文をそのまま使い、文末に句点等がなければ「。」を自動付与する。
+  function formatCaption(raw) {
+    const t = (raw || "").trim();
+    if (!t) return "";
+    return /[。．.!！?？…]$/.test(t) ? t : t + "。";
+  }
+
+  // ライブ映像・プレビューに重ねるHTMLオーバーレイを更新
+  function updateCaptionOverlay() {
+    captionOverlay.textContent = formatCaption(captionText.value);
+  }
+
+  // 日本語向け: 文字単位で折り返す
+  function wrapCaption(ctx, text, maxWidth) {
+    const lines = [];
+    let line = "";
+    for (const ch of text) {
+      if (ch === "\n") { lines.push(line); line = ""; continue; }
+      const test = line + ch;
+      if (line && ctx.measureText(test).width > maxWidth) {
+        lines.push(line);
+        line = ch;
+      } else {
+        line = test;
+      }
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
+
+  // 書き出し用: キャンバスにキャプションを中央配置で焼き込む
+  function drawCaption(ctx, w, h) {
+    const text = formatCaption(captionText.value);
+    if (!text) return;
+    const fontSize = Math.round(w * 0.055);
+    ctx.save();
+    ctx.font = `600 ${fontSize}px -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,0.5)";
+    ctx.shadowBlur = fontSize * 0.3;
+    ctx.shadowOffsetY = Math.max(1, fontSize * 0.04);
+    const lines = wrapCaption(ctx, text, w * 0.84);
+    const lineHeight = fontSize * 1.55;
+    let y = h / 2 - (lineHeight * (lines.length - 1)) / 2;
+    for (const line of lines) {
+      ctx.fillText(line, w / 2, y);
+      y += lineHeight;
+    }
+    ctx.restore();
   }
 
   // ---- 再生方向 ----
@@ -374,6 +430,7 @@
     const msPerFrame = 1000 / targetFps;
     for (let i = 0; i < order.length; i++) {
       ctx.drawImage(frames[order[i]].bitmap, 0, 0, frameW, frameH);
+      drawCaption(ctx, frameW, frameH); // 佐藤。風の白文字を焼き込む
       // captureStream がフレームを拾えるよう実時間で待つ
       await sleep(msPerFrame);
       setStatus(`動画を生成中… ${i + 1} / ${order.length}`);
@@ -449,6 +506,8 @@
     updateSummary();
   });
 
+  captionText.addEventListener("input", updateCaptionOverlay);
+
   onionSkin.addEventListener("change", () => {
     onionOpacityField.hidden = !onionSkin.checked;
     refreshOnion();
@@ -460,6 +519,7 @@
 
   // 初期化
   updateSummary();
+  updateCaptionOverlay();
   if (location.protocol === "file:") {
     setStatus(
       "ヒント: カメラは https かローカルサーバー経由で開くと許可されます。",
