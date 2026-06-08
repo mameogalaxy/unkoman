@@ -18,6 +18,10 @@
 
   const onionCanvas = $("onion");
   const captionOverlay = $("captionOverlay");
+  const resultBox = $("result");
+  const resultVideo = $("resultVideo");
+  const downloadLink = $("downloadLink");
+  const shareBtn = $("shareBtn");
 
   const startCamBtn = $("startCam");
   const recordBtn = $("recordBtn");
@@ -55,6 +59,9 @@
   let frameH = 0;
   let wakeLock = null;
   let currentFacing = "environment"; // "environment"=背面 / "user"=前面
+  let lastVideoBlob = null;
+  let lastVideoUrl = null;
+  let lastVideoName = "timelapse.webm";
 
   // ---- 画面スリープ防止 (Wake Lock) ----
   // スマホでは撮影中に画面が消えると setInterval も止まり撮影が中断する。
@@ -306,6 +313,7 @@
     recordBtn.classList.add("recording");
     playBtn.disabled = true;
     exportBtn.disabled = true;
+    resultBox.hidden = true; // 前回の書き出し結果は隠す
     setStatus(`${(intervalMs() / 1000).toFixed(1)} 秒ごとに撮影中…`);
 
     acquireWakeLock(); // 撮影中は画面を消さない（スマホ対策）
@@ -437,23 +445,50 @@
     recorder.stop();
     await done;
 
+    // 生成済みの動画を保持し、保存/共有/ダウンロードで使い回す（再生成しない）
+    if (lastVideoUrl) URL.revokeObjectURL(lastVideoUrl);
     const blob = new Blob(chunks, { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    a.href = url;
-    a.download = `timelapse-${stamp}.webm`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    lastVideoBlob = blob;
+    lastVideoName = `timelapse-${stamp}.${extForMime(mimeType)}`;
+    lastVideoUrl = URL.createObjectURL(blob);
+
+    // 結果プレビューと保存ボタンを表示
+    resultVideo.src = lastVideoUrl;
+    downloadLink.href = lastVideoUrl;
+    downloadLink.download = lastVideoName;
+    resultBox.hidden = false;
+    // 共有(保存)はファイル共有に対応した端末でのみ表示
+    const canShare =
+      navigator.canShare &&
+      navigator.canShare({
+        files: [new File([blob], lastVideoName, { type: mimeType })],
+      });
+    shareBtn.hidden = !canShare;
 
     exportBtn.disabled = false;
-    setStatus("動画を書き出しました。ダウンロードを確認してください。", "ok");
+    setStatus("動画ができました。下のプレビューから保存できます。", "ok");
+    resultBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  // 生成済み動画をOSの共有シート経由で保存（iPhoneは「ビデオを保存」で写真に入る）
+  async function shareVideo() {
+    if (!lastVideoBlob) return;
+    const file = new File([lastVideoBlob], lastVideoName, {
+      type: lastVideoBlob.type,
+    });
+    try {
+      await navigator.share({ files: [file], title: lastVideoName });
+    } catch (e) {
+      // ユーザーがキャンセルした場合などは無視
+    }
   }
 
   function pickMimeType() {
+    // iPhone(写真アプリ)はWebMを保存できないため、対応していればMP4を優先する
     const candidates = [
+      "video/mp4;codecs=h264",
+      "video/mp4",
       "video/webm;codecs=vp9",
       "video/webm;codecs=vp8",
       "video/webm",
@@ -462,6 +497,10 @@
       if (MediaRecorder.isTypeSupported(c)) return c;
     }
     return "video/webm";
+  }
+
+  function extForMime(mime) {
+    return mime.includes("mp4") ? "mp4" : "webm";
   }
 
   function sleep(ms) {
@@ -474,6 +513,7 @@
     frames.forEach((f) => f.bitmap.close && f.bitmap.close());
     frames = [];
     recordStartTime = 0;
+    resultBox.hidden = true;
     updateSummary();
     enableEditButtons();
     refreshOnion();
@@ -496,6 +536,7 @@
   });
   playBtn.addEventListener("click", playPreview);
   exportBtn.addEventListener("click", exportVideo);
+  shareBtn.addEventListener("click", shareVideo);
   clearBtn.addEventListener("click", clearFrames);
 
   fpsInput.addEventListener("input", () => {
