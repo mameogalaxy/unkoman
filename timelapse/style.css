@@ -46,47 +46,42 @@ body {
 .app-header {
   max-width: 640px;
   margin: 0 auto;
-  padding: 28px 20px 4px;
+  padding: 18px 20px 2px;
 }
 .app-header h1 {
   margin: 0;
-  font-size: 1.9rem;
+  font-size: 1.7rem;
   font-weight: 800;
   letter-spacing: -0.02em;
-}
-.tagline {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 0.95rem;
 }
 
 /* ---- Layout: 単一カラム・モバイル優先 ---- */
 .layout {
   max-width: 640px;
   margin: 0 auto;
-  padding: 16px 16px calc(24px + var(--safe-bottom));
+  padding: 12px 16px calc(20px + var(--safe-bottom));
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 14px;
 }
 
 /* ---- Stage ---- */
 .stage {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 .video-wrap {
   position: relative;
   background: #000;
-  border-radius: 20px;
+  border-radius: 18px;
   overflow: hidden;
-  aspect-ratio: 3 / 4;
+  aspect-ratio: 4 / 3;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
 }
 @media (min-width: 540px) {
-  .video-wrap { aspect-ratio: 4 / 3; }
+  .video-wrap { aspect-ratio: 16 / 9; }
 }
 .video-wrap video,
 .video-wrap canvas {
@@ -153,13 +148,13 @@ body {
   border: none;
   background: var(--fill);
   color: var(--accent);
-  font-size: 1.02rem;
+  font-size: 1rem;
   font-weight: 600;
   font-family: inherit;
-  padding: 13px 16px;
-  border-radius: 13px;
+  padding: 11px 16px;
+  border-radius: 12px;
   cursor: pointer;
-  min-height: 50px;
+  min-height: 46px;
   transition: opacity 0.15s, transform 0.06s, background 0.15s;
 }
 .btn:active:not(:disabled) { transform: scale(0.97); opacity: 0.85; }
@@ -168,8 +163,8 @@ body {
 .btn-primary {
   background: var(--accent);
   color: #fff;
-  font-size: 1.1rem;
-  min-height: 54px;
+  font-size: 1.06rem;
+  min-height: 50px;
 }
 .btn-primary:active:not(:disabled) { background: var(--accent-press); }
 .btn-primary.recording { background: var(--danger); }
@@ -185,42 +180,39 @@ body {
 .status.ok { color: var(--accent); }
 
 /* ---- Settings: iOS設定アプリ風のグループ化カード ---- */
-.settings h2,
-.app-header + .layout h2 {
-  font-size: 1.25rem;
-  font-weight: 700;
-  margin: 4px 4px 10px;
-}
-
 .settings {
   background: var(--card);
   border-radius: var(--radius);
-  padding: 4px 16px;
+  padding: 2px 16px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
-.settings h2 { margin: 14px 0 10px; padding: 0 0; }
 
 /* 各設定行 = リストの1行（下線で区切る） */
 .field {
   display: block;
-  padding: 14px 0;
+  padding: 11px 0;
   border-bottom: 0.5px solid var(--separator);
 }
 .field:last-of-type { border-bottom: none; }
 .field > span {
   display: block;
-  font-size: 0.95rem;
+  font-size: 0.98rem;
   font-weight: 500;
-  margin-bottom: 9px;
+  margin-bottom: 8px;
 }
-.field small {
-  display: block;
-  color: var(--muted);
-  font-size: 0.8rem;
-  margin-top: 7px;
-  line-height: 1.4;
+.field .row { display: flex; gap: 8px; }
+
+/* ラベル左・操作右の1行レイアウト（縦スクロール節約） */
+.field.inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
-.field .row { display: flex; gap: 10px; }
+.field.inline > span { margin-bottom: 0; }
+.field.inline .row { width: auto; }
+.field.inline input[type="number"] { width: 70px; text-align: center; }
+.field.inline select { width: auto; min-width: 92px; }
 
 .field input[type="number"],
 .field select {
@@ -228,7 +220,7 @@ body {
   background: var(--fill);
   border: none;
   color: var(--text);
-  padding: 11px 13px;
+  padding: 10px 13px;
   border-radius: 10px;
   font-size: 1rem;
   font-family: inherit;
@@ -303,19 +295,10 @@ body {
 
 /* サマリー */
 .info-box {
-  margin: 14px 0 4px;
-  padding: 14px 0 4px;
+  padding: 11px 0;
   border-top: 0.5px solid var(--separator);
 }
-.info-box h3 {
-  margin: 0 0 10px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-}
-.info-box dl { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 10px 12px; }
+.info-box dl { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 9px 12px; }
 .info-box dt { color: var(--muted); font-size: 0.95rem; }
 .info-box dd { margin: 0; font-size: 0.95rem; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
 

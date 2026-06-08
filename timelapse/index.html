@@ -2,14 +2,13 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>タイムラプスカメラ</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>タイムラプス</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header class="app-header">
-    <h1>⏱️ タイムラプスカメラ</h1>
-    <p class="tagline">カメラ映像を一定間隔で撮影してタイムラプス動画を作成</p>
+    <h1>タイムラプス</h1>
   </header>
 
   <main class="layout">
@@ -30,79 +29,72 @@
         </div>
 
         <div id="emptyState" class="empty-state">
-          <p>「カメラを開始」を押してください</p>
+          <p>カメラを開始してください</p>
         </div>
       </div>
 
       <div class="transport">
-        <button id="startCam" class="btn">📷 カメラを開始</button>
-        <button id="recordBtn" class="btn btn-primary" disabled>● 撮影開始</button>
-        <button id="shutterBtn" class="btn" disabled>📸 1コマ撮影</button>
-        <button id="playBtn" class="btn" disabled>▶ プレビュー再生</button>
-        <button id="exportBtn" class="btn" disabled>⬇ 動画を書き出し</button>
-        <button id="clearBtn" class="btn btn-ghost" disabled>🗑 クリア</button>
+        <button id="startCam" class="btn">カメラを開始</button>
+        <button id="recordBtn" class="btn btn-primary" disabled>撮影開始</button>
+        <button id="shutterBtn" class="btn" disabled>1コマ撮影</button>
+        <button id="playBtn" class="btn" disabled>プレビュー再生</button>
+        <button id="exportBtn" class="btn" disabled>書き出し</button>
+        <button id="clearBtn" class="btn btn-ghost" disabled>クリア</button>
       </div>
 
       <div id="status" class="status"></div>
     </section>
 
     <aside class="settings">
-      <h2>設定</h2>
-
-      <label class="field">
+      <label class="field inline">
         <span>撮影間隔</span>
         <div class="row">
           <input type="number" id="intervalValue" min="0.1" step="0.1" value="1" />
           <select id="intervalUnit">
-            <option value="1000">秒ごと</option>
-            <option value="60000">分ごと</option>
+            <option value="1000">秒</option>
+            <option value="60000">分</option>
           </select>
         </div>
-        <small>実時間でこの間隔ごとに1フレーム撮影します。</small>
       </label>
 
-      <label class="field">
-        <span>再生フレームレート: <b id="fpsLabel">15</b> fps</span>
-        <input type="range" id="fps" min="1" max="60" value="15" />
-        <small>書き出す動画の滑らかさ。高いほど速く再生されます。</small>
-      </label>
-
-      <label class="field">
+      <label class="field inline">
         <span>カメラ</span>
         <select id="cameraSelect" disabled>
-          <option value="">カメラ未選択</option>
+          <option value="">未選択</option>
         </select>
       </label>
 
-      <label class="field">
+      <label class="field inline">
         <span>再生方向</span>
         <select id="playDirection">
           <option value="forward">順再生</option>
           <option value="reverse">逆再生</option>
-          <option value="boomerang">ブーメラン（往復）</option>
+          <option value="boomerang">ブーメラン</option>
         </select>
-        <small>プレビュー再生と書き出し動画の両方に反映されます。</small>
+      </label>
+
+      <label class="field">
+        <span>再生速度 <b id="fpsLabel">15</b> fps</span>
+        <input type="range" id="fps" min="1" max="60" value="15" />
       </label>
 
       <label class="field checkbox">
+        <span>オニオンスキン</span>
         <input type="checkbox" id="onionSkin" />
-        <span>オニオンスキン（直前コマを重ねる）</span>
       </label>
       <label class="field" id="onionOpacityField" hidden>
-        <span>オニオン濃度: <b id="onionOpacityLabel">40</b>%</span>
+        <span>オニオン濃度 <b id="onionOpacityLabel">40</b>%</span>
         <input type="range" id="onionOpacity" min="10" max="80" value="40" />
-        <small>「📸 1コマ撮影」で前のコマに合わせながらストップモーションが作れます。</small>
       </label>
 
       <label class="field checkbox">
+        <span>タイムスタンプ</span>
         <input type="checkbox" id="showTimestamp" />
-        <span>タイムスタンプを焼き込む</span>
       </label>
 
       <div class="info-box">
-        <h3>撮影サマリー</h3>
         <dl>
-          <dt>撮影フレーム数</dt><dd id="sumFrames">0</dd>
+          <dt>フレーム数</dt><dd id="sumFrames">0</dd>
           <dt>想定再生時間</dt><dd id="sumDuration">0.0 秒</dd>
           <dt>実撮影時間</dt><dd id="sumElapsed">0 秒</dd>
         </dl>

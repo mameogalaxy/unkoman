@@ -212,7 +212,7 @@
       recordBtn.disabled = false;
       shutterBtn.disabled = false;
       cameraSelect.disabled = false;
-      startCamBtn.textContent = "🔄 カメラを切替";
+      startCamBtn.textContent = "カメラを切替";
       setStatus("カメラ準備完了。撮影を開始できます。", "ok");
     } catch (e) {
       setStatus("カメラを起動できませんでした: " + e.message, "error");
@@ -249,7 +249,7 @@
     isRecording = true;
     recordStartTime = Date.now();
     overlayDot.hidden = false;
-    recordBtn.textContent = "■ 撮影停止";
+    recordBtn.textContent = "撮影停止";
     recordBtn.classList.add("recording");
     playBtn.disabled = true;
     exportBtn.disabled = true;
@@ -265,7 +265,7 @@
     clearInterval(captureTimer);
     captureTimer = null;
     overlayDot.hidden = true;
-    recordBtn.textContent = "● 撮影再開";
+    recordBtn.textContent = "撮影再開";
     recordBtn.classList.remove("recording");
     releaseWakeLock();
     enableEditButtons();
@@ -299,7 +299,7 @@
       return;
     }
     isPlaying = true;
-    playBtn.textContent = "⏹ 停止";
+    playBtn.textContent = "停止";
     onionCanvas.hidden = true;
     showPlaybackCanvas();
     const ctx = playbackCanvas.getContext("2d");
@@ -321,7 +321,7 @@
     isPlaying = false;
     clearInterval(playTimer);
     playTimer = null;
-    playBtn.textContent = "▶ プレビュー再生";
+    playBtn.textContent = "プレビュー再生";
     showLivePreview();
     updateSummary();
     refreshOnion();
