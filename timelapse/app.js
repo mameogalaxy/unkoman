@@ -43,6 +43,38 @@
   let playTimer = null;
   let frameW = 0;
   let frameH = 0;
+  let wakeLock = null;
+
+  // ---- 画面スリープ防止 (Wake Lock) ----
+  // スマホでは撮影中に画面が消えると setInterval も止まり撮影が中断する。
+  async function acquireWakeLock() {
+    if (!("wakeLock" in navigator)) return;
+    try {
+      wakeLock = await navigator.wakeLock.request("screen");
+      // 画面復帰時に自動解放されることがあるため再取得する
+      wakeLock.addEventListener("release", () => {
+        if (isRecording) acquireWakeLock();
+      });
+    } catch (e) {
+      /* 取得失敗は致命的ではない */
+    }
+  }
+
+  async function releaseWakeLock() {
+    try {
+      if (wakeLock) await wakeLock.release();
+    } catch (e) {
+      /* ignore */
+    }
+    wakeLock = null;
+  }
+
+  // タブが再表示されたら（撮影中なら）Wake Lock を取り直す
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && isRecording) {
+      acquireWakeLock();
+    }
+  });
 
   // ---- ユーティリティ ----
   function setStatus(msg, kind = "") {
@@ -181,6 +213,7 @@
     exportBtn.disabled = true;
     setStatus(`${(intervalMs() / 1000).toFixed(1)} 秒ごとに撮影中…`);
 
+    acquireWakeLock(); // 撮影中は画面を消さない（スマホ対策）
     captureFrame(); // 最初の1枚をすぐ撮る
     captureTimer = setInterval(captureFrame, intervalMs());
   }
@@ -192,6 +225,7 @@
     overlayDot.hidden = true;
     recordBtn.textContent = "● 撮影再開";
     recordBtn.classList.remove("recording");
+    releaseWakeLock();
     enableEditButtons();
     setStatus(`撮影を停止しました（${frames.length} フレーム）。`, "ok");
   }
