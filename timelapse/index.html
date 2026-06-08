@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>タイムラプスカメラ</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>⏱️ タイムラプスカメラ</h1>
+    <p class="tagline">カメラ映像を一定間隔で撮影してタイムラプス動画を作成</p>
+  </header>
+
+  <main class="layout">
+    <section class="stage">
+      <div class="video-wrap">
+        <!-- ライブプレビュー -->
+        <video id="preview" playsinline muted></video>
+        <!-- キャプチャ用の隠しキャンバス -->
+        <canvas id="capture" hidden></canvas>
+        <!-- 撮影済みフレームの再生プレビュー -->
+        <canvas id="playback" hidden></canvas>
+
+        <div id="overlay" class="overlay">
+          <span id="recDot" class="rec-dot" hidden></span>
+          <span id="frameCounter" class="frame-counter">0 フレーム</span>
+        </div>
+
+        <div id="emptyState" class="empty-state">
+          <p>「カメラを開始」を押してください</p>
+        </div>
+      </div>
+
+      <div class="transport">
+        <button id="startCam" class="btn">📷 カメラを開始</button>
+        <button id="recordBtn" class="btn btn-primary" disabled>● 撮影開始</button>
+        <button id="playBtn" class="btn" disabled>▶ プレビュー再生</button>
+        <button id="exportBtn" class="btn" disabled>⬇ 動画を書き出し</button>
+        <button id="clearBtn" class="btn btn-ghost" disabled>🗑 クリア</button>
+      </div>
+
+      <div id="status" class="status"></div>
+    </section>
+
+    <aside class="settings">
+      <h2>設定</h2>
+
+      <label class="field">
+        <span>撮影間隔</span>
+        <div class="row">
+          <input type="number" id="intervalValue" min="0.1" step="0.1" value="1" />
+          <select id="intervalUnit">
+            <option value="1000">秒ごと</option>
+            <option value="60000">分ごと</option>
+          </select>
+        </div>
+        <small>実時間でこの間隔ごとに1フレーム撮影します。</small>
+      </label>
+
+      <label class="field">
+        <span>再生フレームレート: <b id="fpsLabel">15</b> fps</span>
+        <input type="range" id="fps" min="1" max="60" value="15" />
+        <small>書き出す動画の滑らかさ。高いほど速く再生されます。</small>
+      </label>
+
+      <label class="field">
+        <span>カメラ</span>
+        <select id="cameraSelect" disabled>
+          <option value="">カメラ未選択</option>
+        </select>
+      </label>
+
+      <label class="field checkbox">
+        <input type="checkbox" id="showTimestamp" />
+        <span>タイムスタンプを焼き込む</span>
+      </label>
+
+      <div class="info-box">
+        <h3>撮影サマリー</h3>
+        <dl>
+          <dt>撮影フレーム数</dt><dd id="sumFrames">0</dd>
+          <dt>想定再生時間</dt><dd id="sumDuration">0.0 秒</dd>
+          <dt>実撮影時間</dt><dd id="sumElapsed">0 秒</dd>
+        </dl>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="app-footer">
+    <span>すべてブラウザ内で処理され、映像は外部に送信されません。</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
