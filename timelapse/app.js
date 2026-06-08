@@ -16,8 +16,11 @@
   const emptyState = $("emptyState");
   const statusEl = $("status");
 
+  const onionCanvas = $("onion");
+
   const startCamBtn = $("startCam");
   const recordBtn = $("recordBtn");
+  const shutterBtn = $("shutterBtn");
   const playBtn = $("playBtn");
   const exportBtn = $("exportBtn");
   const clearBtn = $("clearBtn");
@@ -28,6 +31,11 @@
   const fpsLabel = $("fpsLabel");
   const cameraSelect = $("cameraSelect");
   const showTimestamp = $("showTimestamp");
+  const playDirection = $("playDirection");
+  const onionSkin = $("onionSkin");
+  const onionOpacity = $("onionOpacity");
+  const onionOpacityField = $("onionOpacityField");
+  const onionOpacityLabel = $("onionOpacityLabel");
 
   const sumFrames = $("sumFrames");
   const sumDuration = $("sumDuration");
@@ -90,6 +98,38 @@
 
   function fps() {
     return parseInt(fpsInput.value, 10) || 15;
+  }
+
+  // ---- オニオンスキン ----
+  // 直前に撮影したフレームを、ライブ映像の上に半透明で重ねて表示する。
+  // ストップモーション撮影で前のコマに位置を合わせるのに使う。
+  function refreshOnion() {
+    const active = onionSkin.checked && frames.length > 0 && !isPlaying;
+    onionCanvas.hidden = !active;
+    if (!active) return;
+    const last = frames[frames.length - 1];
+    onionCanvas.width = frameW;
+    onionCanvas.height = frameH;
+    onionCanvas.style.opacity = String(parseInt(onionOpacity.value, 10) / 100);
+    const ctx = onionCanvas.getContext("2d");
+    ctx.clearRect(0, 0, frameW, frameH);
+    ctx.drawImage(last.bitmap, 0, 0, frameW, frameH);
+  }
+
+  // ---- 再生方向 ----
+  // 順再生 / 逆再生 / ブーメラン(往復) に応じてフレーム順の index 配列を返す。
+  function playbackOrder() {
+    const n = frames.length;
+    const forward = Array.from({ length: n }, (_, i) => i);
+    switch (playDirection.value) {
+      case "reverse":
+        return forward.slice().reverse();
+      case "boomerang":
+        // 0..n-1 のあと n-2..1 を足して往復させる（端の重複は避ける）
+        return forward.concat(forward.slice(1, -1).reverse());
+      default:
+        return forward;
+    }
   }
 
   function updateSummary() {
@@ -170,6 +210,7 @@
 
       await listCameras();
       recordBtn.disabled = false;
+      shutterBtn.disabled = false;
       cameraSelect.disabled = false;
       startCamBtn.textContent = "🔄 カメラを切替";
       setStatus("カメラ準備完了。撮影を開始できます。", "ok");
@@ -200,6 +241,7 @@
     frameH = h;
     updateSummary();
     enableEditButtons();
+    refreshOnion();
   }
 
   function startRecording() {
@@ -258,17 +300,19 @@
     }
     isPlaying = true;
     playBtn.textContent = "⏹ 停止";
+    onionCanvas.hidden = true;
     showPlaybackCanvas();
     const ctx = playbackCanvas.getContext("2d");
+    const order = playbackOrder();
     let i = 0;
     const intervalPerFrame = 1000 / fps();
     playTimer = setInterval(() => {
-      if (i >= frames.length) {
+      if (i >= order.length) {
         stopPreview();
         return;
       }
-      ctx.drawImage(frames[i].bitmap, 0, 0, frameW, frameH);
-      frameCounter.textContent = `${i + 1} / ${frames.length}`;
+      ctx.drawImage(frames[order[i]].bitmap, 0, 0, frameW, frameH);
+      frameCounter.textContent = `${i + 1} / ${order.length}`;
       i++;
     }, intervalPerFrame);
   }
@@ -280,6 +324,7 @@
     playBtn.textContent = "▶ プレビュー再生";
     showLivePreview();
     updateSummary();
+    refreshOnion();
   }
 
   // ---- 書き出し ----
@@ -325,12 +370,13 @@
 
     recorder.start();
 
+    const order = playbackOrder();
     const msPerFrame = 1000 / targetFps;
-    for (let i = 0; i < frames.length; i++) {
-      ctx.drawImage(frames[i].bitmap, 0, 0, frameW, frameH);
+    for (let i = 0; i < order.length; i++) {
+      ctx.drawImage(frames[order[i]].bitmap, 0, 0, frameW, frameH);
       // captureStream がフレームを拾えるよう実時間で待つ
       await sleep(msPerFrame);
-      setStatus(`動画を生成中… ${i + 1} / ${frames.length}`);
+      setStatus(`動画を生成中… ${i + 1} / ${order.length}`);
     }
     // 最後のフレームを確実に含める
     await sleep(msPerFrame * 2);
@@ -376,6 +422,7 @@
     recordStartTime = 0;
     updateSummary();
     enableEditButtons();
+    refreshOnion();
     setStatus("フレームをクリアしました。");
   }
 
@@ -390,6 +437,9 @@
     if (isRecording) stopRecording();
     else startRecording();
   });
+  shutterBtn.addEventListener("click", () => {
+    if (stream && !isPlaying) captureFrame();
+  });
   playBtn.addEventListener("click", playPreview);
   exportBtn.addEventListener("click", exportVideo);
   clearBtn.addEventListener("click", clearFrames);
@@ -397,6 +447,15 @@
   fpsInput.addEventListener("input", () => {
     fpsLabel.textContent = fps();
     updateSummary();
+  });
+
+  onionSkin.addEventListener("change", () => {
+    onionOpacityField.hidden = !onionSkin.checked;
+    refreshOnion();
+  });
+  onionOpacity.addEventListener("input", () => {
+    onionOpacityLabel.textContent = onionOpacity.value;
+    refreshOnion();
   });
 
   // 初期化
