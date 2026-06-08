@@ -22,6 +22,8 @@
         <canvas id="playback" hidden></canvas>
         <!-- オニオンスキン: 直前フレームをライブ映像に重ねる -->
         <canvas id="onion" class="onion-overlay" hidden></canvas>
+        <!-- 佐藤。風キャプション（中央・白文字） -->
+        <div id="captionOverlay" class="caption-overlay"></div>
 
         <div id="overlay" class="overlay">
           <span id="recDot" class="rec-dot" hidden></span>
@@ -46,6 +48,11 @@
     </section>
 
     <aside class="settings">
+      <label class="field">
+        <span>キャプション</span>
+        <input type="text" id="captionText" placeholder="例: ご飯食べた" maxlength="40" />
+      </label>
+
       <label class="field inline">
         <span>撮影間隔</span>
         <div class="row">
