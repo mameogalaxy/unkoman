@@ -21,6 +21,8 @@
         <canvas id="capture" hidden></canvas>
         <!-- 撮影済みフレームの再生プレビュー -->
         <canvas id="playback" hidden></canvas>
+        <!-- オニオンスキン: 直前フレームをライブ映像に重ねる -->
+        <canvas id="onion" class="onion-overlay" hidden></canvas>
 
         <div id="overlay" class="overlay">
           <span id="recDot" class="rec-dot" hidden></span>
@@ -35,6 +37,7 @@
       <div class="transport">
         <button id="startCam" class="btn">📷 カメラを開始</button>
         <button id="recordBtn" class="btn btn-primary" disabled>● 撮影開始</button>
+        <button id="shutterBtn" class="btn" disabled>📸 1コマ撮影</button>
         <button id="playBtn" class="btn" disabled>▶ プレビュー再生</button>
         <button id="exportBtn" class="btn" disabled>⬇ 動画を書き出し</button>
         <button id="clearBtn" class="btn btn-ghost" disabled>🗑 クリア</button>
@@ -69,6 +72,26 @@
         <select id="cameraSelect" disabled>
           <option value="">カメラ未選択</option>
         </select>
+      </label>
+
+      <label class="field">
+        <span>再生方向</span>
+        <select id="playDirection">
+          <option value="forward">順再生</option>
+          <option value="reverse">逆再生</option>
+          <option value="boomerang">ブーメラン（往復）</option>
+        </select>
+        <small>プレビュー再生と書き出し動画の両方に反映されます。</small>
+      </label>
+
+      <label class="field checkbox">
+        <input type="checkbox" id="onionSkin" />
+        <span>オニオンスキン（直前コマを重ねる）</span>
+      </label>
+      <label class="field" id="onionOpacityField" hidden>
+        <span>オニオン濃度: <b id="onionOpacityLabel">40</b>%</span>
+        <input type="range" id="onionOpacity" min="10" max="80" value="40" />
+        <small>「📸 1コマ撮影」で前のコマに合わせながらストップモーションが作れます。</small>
       </label>
 
       <label class="field checkbox">

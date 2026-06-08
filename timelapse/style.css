@@ -61,6 +61,14 @@ body {
   display: block;
 }
 
+/* オニオンスキン: ライブ映像の上に直前フレームを半透明で重ねる */
+.onion-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.4;
+}
+
 .overlay {
   position: absolute;
   top: 10px;
