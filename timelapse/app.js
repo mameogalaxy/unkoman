@@ -54,6 +54,7 @@
   let frameW = 0;
   let frameH = 0;
   let wakeLock = null;
+  let currentFacing = "environment"; // "environment"=背面 / "user"=前面
 
   // ---- 画面スリープ防止 (Wake Lock) ----
   // スマホでは撮影中に画面が消えると setInterval も止まり撮影が中断する。
@@ -222,38 +223,26 @@
   }
 
   // ---- カメラ ----
-  async function listCameras() {
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const cams = devices.filter((d) => d.kind === "videoinput");
-      cameraSelect.innerHTML = "";
-      cams.forEach((cam, i) => {
-        const opt = document.createElement("option");
-        opt.value = cam.deviceId;
-        opt.textContent = cam.label || `カメラ ${i + 1}`;
-        cameraSelect.appendChild(opt);
-      });
-      cameraSelect.disabled = cams.length === 0;
-    } catch (e) {
-      // 列挙に失敗しても致命的ではない
-    }
-  }
-
-  async function startCamera(deviceId) {
+  // facingMode("environment"=背面 / "user"=前面)で切り替える。
+  // iOS Safari では deviceId 指定よりも facingMode の方が確実に前面/背面を選べる。
+  async function startCamera(facing) {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setStatus("このブラウザはカメラに対応していません。", "error");
       return;
     }
+    facing = facing === "user" ? "user" : "environment";
     try {
       if (stream) stream.getTracks().forEach((t) => t.stop());
+      // exact だと該当カメラが無い端末で失敗するため ideal で指定する
       const constraints = {
-        video: deviceId
-          ? { deviceId: { exact: deviceId } }
-          : { facingMode: "environment", width: { ideal: 1280 } },
+        video: { facingMode: { ideal: facing }, width: { ideal: 1280 } },
         audio: false,
       };
       stream = await navigator.mediaDevices.getUserMedia(constraints);
+      currentFacing = facing;
       preview.srcObject = stream;
+      // 前面カメラは自撮りで自然な向きになるよう鏡像表示にする
+      preview.style.transform = facing === "user" ? "scaleX(-1)" : "none";
       await preview.play();
       preview.hidden = false;
       playbackCanvas.hidden = true;
@@ -264,7 +253,6 @@
       frameW = s.width || preview.videoWidth || 1280;
       frameH = s.height || preview.videoHeight || 720;
 
-      await listCameras();
       recordBtn.disabled = false;
       shutterBtn.disabled = false;
       cameraSelect.disabled = false;
@@ -283,7 +271,16 @@
     captureCanvas.width = w;
     captureCanvas.height = h;
     const ctx = captureCanvas.getContext("2d");
-    ctx.drawImage(preview, 0, 0, w, h);
+    if (currentFacing === "user") {
+      // 前面カメラは鏡像表示しているので、保存フレームも同じ向きに揃える
+      ctx.save();
+      ctx.translate(w, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(preview, 0, 0, w, h);
+      ctx.restore();
+    } else {
+      ctx.drawImage(preview, 0, 0, w, h);
+    }
 
     const now = new Date();
     if (showTimestamp.checked) {
@@ -485,7 +482,7 @@
 
   // ---- イベント ----
   startCamBtn.addEventListener("click", () =>
-    startCamera(cameraSelect.value || null)
+    startCamera(cameraSelect.value)
   );
   cameraSelect.addEventListener("change", () => {
     if (stream) startCamera(cameraSelect.value);
