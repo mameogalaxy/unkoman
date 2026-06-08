@@ -189,6 +189,41 @@ body {
 .btn-primary.recording { background: var(--danger); }
 .btn-ghost { background: transparent; color: var(--danger); }
 
+/* 書き出し結果（プレビュー＋保存ボタン） */
+.result {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.result video {
+  width: 100%;
+  border-radius: 12px;
+  background: #000;
+  display: block;
+}
+.result-actions {
+  display: flex;
+  gap: 10px;
+}
+.result-actions > * { flex: 1; }
+/* aタグのダウンロードボタンを他のボタンと揃える */
+a.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+.result-hint {
+  margin: 0;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
 .status {
   text-align: center;
   min-height: 1.2em;
