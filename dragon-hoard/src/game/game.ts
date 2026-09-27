@@ -3,7 +3,7 @@
 // 出力: events（払い出し・大ルーレット・効果音）と、画面が読む状態
 import { mulberry32 } from '../physics/seed.ts';
 import {
-  CHECKER_STAY, CHEST_SLOT_TABLE, CHEST_TABLE, DAMAGE, DUNGEON_COUNT, ELEMS, ENEMY, ENEMY_ATTACK_EVERY, ENEMY_TILE_RATE,
+  CHECKER_STAY, CHEST_SLOT_TABLE, CHEST_TABLE, DAMAGE, DUNGEON_COUNT, ELEMS, ENEMY, ENEMY_ATTACK_EVERY, ENEMY_DUNGEON_ATK, ENEMY_FIRST_ATTACK, ENEMY_LOOP_ATK, ENEMY_TILE_RATE,
   FLOORS_PER_DUNGEON, GAUGE, GOLD_CELLS, GOLD_WEIGHTS, JACKPOT_TABLE, LANE_SHUFFLE_EVERY, LOOT_CELLS, LOOT_WEIGHTS, MAX_STOCK,
   ORBS_FOR_WHEEL, PARTY_SIZE, SILVER_CELLS, SILVER_WEIGHTS, SLOT_SYMBOLS, TILES_PER_FLOOR, WEAKNESS,
   battleLanes, enemyTable, jackpotSpins, pick,
@@ -37,6 +37,8 @@ export interface BattleMode {
   /** 最後に攻撃を受けた敵 */
   target: number;
   heroHitT: number;
+  /** 最後に受けたダメージ */
+  lastAtk: number;
   gauge: number;
 }
 
@@ -156,7 +158,7 @@ export class Game {
     return tiles;
   }
 
-  get maxHp() { return 90 + this.s.lv * 10; }
+  get maxHp() { return 94 + this.s.lv * 6; }
   get isBossFloor() { return this.s.floor >= FLOORS_PER_DUNGEON; }
   get busy() { return this.mode.m !== 'map'; }
   get battle(): BattleMode | null { return this.mode.m === 'battle' ? this.mode : null; }
@@ -335,7 +337,8 @@ export class Game {
         if (alive > 0 && md.atkT > ENEMY_ATTACK_EVERY / (1 + 0.35 * (alive - 1))) {
           md.atkT = 0;
           md.heroHitT = 0;
-          this.s.hp = Math.max(0, this.s.hp - ENEMY[md.kind].atk);
+          md.lastAtk = this.enemyAtk(md.kind);
+          this.s.hp = Math.max(0, this.s.hp - md.lastAtk);
           this.sfx('enemyHit');
           if (this.s.hp <= 0) {
             this.s.battle = undefined;
@@ -346,6 +349,7 @@ export class Game {
         if (alive === 0 && md.hitT > 0.9) {
           this.s.battle = undefined;
           this.gainExp(ENEMY[md.kind].exp * md.hps.length);
+          this.s.hp = Math.min(this.maxHp, this.s.hp + 8);
           this.mode = { m: 'victory', kind: md.kind, party: md.hps.length, t: 0 };
           this.sfx('fanfare');
         }
@@ -452,16 +456,22 @@ export class Game {
   private battleMode(kind: EnemyKind, element: Elem, hps: number[], gauge: number): BattleMode {
     return {
       m: 'battle', kind, element, hps: hps.slice(), max: ENEMY[kind].hp, lanes: battleLanes(element, this.rand), shuffleT: 0,
-      t: 0, atkT: 0, hitT: 9, lastDmg: 0, lastType: 'normal', target: 0, heroHitT: 9, gauge,
+      t: 0, atkT: ENEMY_ATTACK_EVERY - ENEMY_FIRST_ATTACK, hitT: 9, lastDmg: 0, lastType: 'normal', target: 0, heroHitT: 9, lastAtk: 0, gauge,
     };
+  }
+
+  /** 敵の攻撃力（周回で強くなり、ぶれ ±20%） */
+  private enemyAtk(kind: EnemyKind) {
+    const base = ENEMY[kind].atk * (1 + ENEMY_LOOP_ATK * this.s.loop + ENEMY_DUNGEON_ATK * this.s.dungeon);
+    return Math.round(base * (0.8 + this.rand() * 0.4));
   }
 
   private gainExp(n: number) {
     this.s.exp += n;
-    while (this.s.exp >= this.s.lv * 12) {
-      this.s.exp -= this.s.lv * 12;
+    while (this.s.exp >= this.s.lv * 20) {
+      this.s.exp -= this.s.lv * 20;
       this.s.lv++;
-      this.s.hp = this.maxHp;
+      this.s.hp = Math.min(this.maxHp, this.s.hp + 25); // レベルアップで少し回復
     }
   }
 
@@ -603,7 +613,7 @@ export class Game {
     this.s.board = Game.makeBoard(this.s.dungeon, this.s.floor, this.rand);
     this.s.pos = 0;
     this.heroX = 0;
-    this.s.hp = Math.min(this.maxHp, this.s.hp + 30);
+    this.s.hp = Math.min(this.maxHp, this.s.hp + 20);
     this.mode = { m: 'map' };
   }
 

@@ -11,6 +11,7 @@ let stuck = 0, lastMode = '', modeT = 0;
 const byMode: Record<string, number> = {};
 const payouts: Record<string, number> = {};
 let wheelAt = -1;
+let retreats = 0, minHp = 999;
 for (let t = 0; t < minutes * 60; t += dt) {
   if (Math.random() < 3 * dt) {
     g.fed();
@@ -37,6 +38,8 @@ for (let t = 0; t < minutes * 60; t += dt) {
     g.wheelStopped();
   }
   const m = g.mode.m;
+  if (m === 'retreat' && lastMode !== 'retreat') retreats++;
+  minHp = Math.min(minHp, g.s.hp);
   byMode[m] = (byMode[m] ?? 0) + dt;
   if (m === lastMode && m !== 'map' && m !== 'battle') {
     modeT += dt;
@@ -46,5 +49,6 @@ for (let t = 0; t < minutes * 60; t += dt) {
 const s = g.s;
 console.log(`${minutes}分: 投入 ${s.totals.fed}, チェッカー ${s.totals.checker}, 払い出し ${s.totals.paid} (${(s.totals.paid / s.totals.fed * 100).toFixed(1)}%), 大ルーレット ${s.totals.wheel}回`);
 console.log(`到達: 迷宮${s.dungeon + 1} ${s.floor + 1}F 周回${s.loop}  Lv${s.lv}  宝玉${s.orbs}  stuck=${stuck}`);
+console.log(`撤退 ${retreats}回, 最低HP ${minHp}`);
 console.log('払い出し内訳', payouts);
 console.log('時間配分(秒)', Object.fromEntries(Object.entries(byMode).map(([k, v]) => [k, Math.round(v)])));

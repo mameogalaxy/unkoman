@@ -30,15 +30,20 @@ export const CHEST_TABLE: Weighted<ChestItem> = [
 
 export type EnemyKind = 0 | 1 | 2 | 3; // 弱・中・強・ボス
 export const ENEMY = [
-  { name: 'スライム', hp: 6, atk: 6, exp: 2 },
-  { name: 'コウモリ騎士', hp: 14, atk: 10, exp: 5 },
-  { name: '岩の番人', hp: 26, atk: 16, exp: 10 },
-  { name: '宝を喰らう竜', hp: 70, atk: 22, exp: 30 },
+  { name: 'スライム', hp: 8, atk: 10, exp: 2 },
+  { name: 'コウモリ騎士', hp: 18, atk: 16, exp: 5 },
+  { name: '岩の番人', hp: 34, atk: 24, exp: 10 },
+  { name: '宝を喰らう竜', hp: 90, atk: 32, exp: 30 },
 ] as const;
 /** 敵パーティの人数（最小, 最大） */
 export const PARTY_SIZE: [number, number][] = [[1, 3], [1, 2], [1, 1], [1, 1]];
-/** 敵の攻撃間隔（秒）。仲間が多いほど短くなる */
-export const ENEMY_ATTACK_EVERY = 8;
+/** 敵の攻撃間隔（秒）。仲間が多いほど短くなる。戦闘開始から最初の攻撃までは FIRST 秒 */
+export const ENEMY_ATTACK_EVERY = 4.5;
+export const ENEMY_FIRST_ATTACK = 1.8;
+/** 周回ごとに敵の攻撃力が増える割合 */
+export const ENEMY_LOOP_ATK = 0.25;
+/** ダンジョンが深いほど敵の攻撃力が増える割合 */
+export const ENEMY_DUNGEON_ATK = 0.15;
 
 // ---- 戦闘: レーンの属性 ------------------------------------------------------
 // 穴に入ったメダルのレーンで攻撃が決まる。敵の弱点属性なら大ダメージ、敵と同じ属性は吸収されて回復、ミスは空振り

@@ -88,7 +88,7 @@ function flameTexture() {
 interface TileObj {
   root: THREE.Group;
   /** 敵パーティ（1〜3体） */
-  enemies?: { actor: Actor; deadT: number }[];
+  enemies?: { actor: Actor; deadT: number; baseZ: number }[];
   chest?: ChestActor;
   stairs?: { root: THREE.Group; beam: THREE.Mesh };
 }
@@ -247,7 +247,7 @@ export class DungeonView {
           actor.root.position.set(x, 0.14, n === 3 && k === 1 ? -0.45 : 0);
           if (n > 1) actor.root.scale.setScalar(0.85);
           o!.root.add(actor.root);
-          return { actor, deadT: -1 };
+          return { actor, deadT: -1, baseZ: actor.root.position.z };
         });
       } else if (!wantEnemy && o.enemies && g.mode.m !== 'victory') {
         for (const e of o.enemies) {
@@ -278,7 +278,9 @@ export class DungeonView {
     // 宝箱・戦闘では主人公が左に寄って、カメラから相手が見えるようにする
     const side = inBattle || md.m === 'chest' ? -0.75 : 0;
     this.heroSide += (side - this.heroSide) * Math.min(1, dt * 4);
-    this.hero.root.position.set(this.heroSide, 0.14, heroZ);
+    // 攻撃を受けると後ろへよろける
+    const knock = md.m === 'battle' && md.heroHitT < 0.6 ? Math.sin((md.heroHitT / 0.6) * Math.PI) * 0.5 : 0;
+    this.hero.root.position.set(this.heroSide, 0.14, heroZ + knock);
     const walking = md.m === 'move' || Math.abs(g.heroX - g.s.pos) > 0.02;
     this.hero.update(t, {
       walk: walking ? 1 : 0,
@@ -297,6 +299,9 @@ export class DungeonView {
           const dead = (b && b.hps[k] === 0) || (here && md.m === 'victory');
           if (dead && e.deadT < 0) e.deadT = 0;
           if (e.deadT >= 0) e.deadT += dt;
+          // 攻撃: 主人公に向かって踏み込む
+          const lunge = b && b.heroHitT < 0.6 && b.hps[k] > 0 ? Math.sin((b.heroHitT / 0.6) * Math.PI) : 0;
+          e.actor.root.position.z = e.baseZ + lunge * (md.m === 'battle' && md.kind === 3 ? 2.2 : 1.1);
           e.actor.update(t + i + k * 1.3, {
             hurt: hit ? 1 - b!.hitT / 0.3 : 0,
             attack: b && b.heroHitT < 0.5 ? b.heroHitT / 0.5 : 0,

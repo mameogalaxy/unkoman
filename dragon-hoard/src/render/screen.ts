@@ -173,7 +173,8 @@ export class LcdScreen {
     if (md.heroHitT < 0.6) {
       ctx.fillStyle = `rgba(255,0,0,${0.35 * (1 - md.heroHitT / 0.6)})`;
       ctx.fillRect(0, TOP, W, BOTTOM - TOP);
-      bigText(ctx, `-${ENEMY[kind].atk}`, 250, 470 - md.heroHitT * 40, 60, LATIN, 900, '#ff6a5a');
+      bigText(ctx, `-${md.lastAtk}`, 250, 470 - md.heroHitT * 40, 72, LATIN, 900, '#ff6a5a');
+      bigText(ctx, `${ENEMY[kind].name}の攻撃！`, W / 2, 250, 52, JP, 400, '#ffb0a0');
     }
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
     roundRect(ctx, 232, BOTTOM - 54, 560, 44, 20);
@@ -343,6 +344,18 @@ export class LcdScreen {
   private drawSlot(ctx: Ctx, md: Extract<Game['mode'], { m: 'slot' }>, t: number) {
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
     ctx.fillRect(0, TOP, W, BOTTOM - TOP);
+    if (md.jackpot) {
+      // ジャックポットは頭上の3Dスロットで回す。液晶は案内と結果だけ
+      const on = Math.floor(t * 4) % 2 === 0;
+      bigText(ctx, 'JACKPOT CHANCE!', W / 2, TOP + 90, 76);
+      bigText(ctx, '↑ 頭上のスロットを見ろ！', W / 2, 330, 58, JP, 400, on ? '#fff' : '#ffd23a');
+      bigText(ctx, `${md.spin + 1} / ${md.spins}回目`, W / 2, 430, 48, JP, 400, '#fff');
+      if (md.t >= 2.9) {
+        const o = md.outcome;
+        bigText(ctx, o.k === 'dragon' ? '竜が揃った！！' : o.k === 'orb' ? `宝玉 ×${o.n}` : `${o.n}枚！`, W / 2, 540, 70, JP, 400);
+      }
+      return;
+    }
     bigText(ctx, md.jackpot ? 'JACKPOT SLOT' : 'TREASURE SLOT', W / 2, TOP + 66, 64);
     const stops = [1.4, 2.0, 2.9];
     const rw = 210, rh = 250, gap = 24;

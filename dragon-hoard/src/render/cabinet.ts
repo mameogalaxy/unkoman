@@ -10,7 +10,7 @@ import { GiantWheel } from './wheel.ts';
 
 /** 八角形の中心（中央の塔の位置） */
 export const TOWER_CENTER = new THREE.Vector3(0, 0, -86); // 幅42のステーション8台が重ならない距離
-export const WHEEL_POS = new THREE.Vector3(0, 66, -58);
+export const WHEEL_POS = new THREE.Vector3(0, 76, -60); // 頭上のジャックポットスロットより上
 export const WHEEL_RADIUS = 17;
 
 export interface Cabinet {
@@ -310,8 +310,8 @@ function tower(m: Mats, envMap: THREE.Texture | null) {
   wheel.group.position.copy(WHEEL_POS);
   g.add(wheel.group);
   // ルーレットの支柱
-  const col = new THREE.Mesh(new THREE.CylinderGeometry(3, 4, 22, 12), m.gold);
-  col.position.set(WHEEL_POS.x, 44 + 5, WHEEL_POS.z - 3);
+  const col = new THREE.Mesh(new THREE.CylinderGeometry(3, 4, WHEEL_POS.y - 44, 12), m.gold);
+  col.position.set(WHEEL_POS.x, 44 + (WHEEL_POS.y - 44) / 2, WHEEL_POS.z - 3);
   g.add(col);
   const d1 = dragonStatue({ body: '#1f7a62', belly: '#d8a640', wing: '#7a1f24', eye: '#ffcf30' }, envMap);
   d1.position.set(-27, 44, WHEEL_POS.z - 6);

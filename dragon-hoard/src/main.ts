@@ -15,6 +15,7 @@ import { buildCabinet, WHEEL_POS } from './render/cabinet.ts';
 import { MedalRenderer } from './render/medals.ts';
 import { Lamps, Sparkles, type LampMode } from './render/fx.ts';
 import { LcdScreen } from './render/screen.ts';
+import { SLOT_POS, Slot3D } from './render/slot3d.ts';
 import { DungeonView } from './screen3d/dungeon.ts';
 import { LcdComposer } from './screen3d/lcd.ts';
 
@@ -93,6 +94,8 @@ const CAMS = [
 let camIndex = Number(qs.get('cam') ?? 0) % CAMS.length;
 /** 大ルーレットの演出中のカメラ（盤面の正面に寄る） */
 const WHEEL_CAM = { pos: new THREE.Vector3(0, WHEEL_POS.y - 4, WHEEL_POS.z + 52), look: WHEEL_POS.clone() };
+/** 頭上のジャックポットスロットを見上げるカメラ */
+const SLOT_CAM = { pos: new THREE.Vector3(0, SLOT_POS.y - 2, SLOT_POS.z + 36), look: SLOT_POS.clone().add(new THREE.Vector3(0, 1.5, 0)) };
 const controls = new OrbitControls(camera, canvasEl);
 controls.enabled = false;
 const camTarget = { pos: CAMS[camIndex].pos.clone(), look: CAMS[camIndex].look.clone() };
@@ -186,6 +189,8 @@ async function main() {
   scene.add(cabinet.group);
   const medals = new MedalRenderer(CAPACITY, envMap);
   scene.add(medals.mesh);
+  const slot3d = new Slot3D(envMap);
+  scene.add(slot3d.group);
   const sparkles = new Sparkles(500);
   scene.add(sparkles.points);
   const lamps = new Lamps(cabinet.lampTubes);
@@ -419,8 +424,9 @@ async function main() {
     // 大ルーレットの間はカメラが寄る
     const md = game.mode;
     const wheelTime = md.m === 'wheelIntro' || md.m === 'wheel' || (md.m === 'get' && cabinet.wheel.recentlyStopped);
+    const slotTime = (md.m === 'slot' && md.jackpot) || (md.m === 'get' && md.label === 'ジャックポット');
     if (!controls.enabled) {
-      const c = wheelTime ? WHEEL_CAM : CAMS[camIndex];
+      const c = wheelTime ? WHEEL_CAM : slotTime ? SLOT_CAM : CAMS[camIndex];
       camTarget.pos.copy(c.pos);
       camTarget.look.copy(c.look);
     }
@@ -454,6 +460,7 @@ async function main() {
     recoil = Math.max(0, recoil - dtFrame * 6);
     cabinet.shooter.barrel.position.z = recoil * 0.5;
     cabinet.wheel.update(t, dtFrame);
+    slot3d.update(game, t, dtFrame);
     // ランプと BGM は場面で切り替える
     const mdl = game.mode;
     const fever = mdl.m === 'wheelIntro' || mdl.m === 'wheel' || (mdl.m === 'get' && mdl.amount >= 100) || (mdl.m === 'slot' && mdl.jackpot);
