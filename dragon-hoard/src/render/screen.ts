@@ -1,320 +1,541 @@
-// 奥壁の液晶画面。静的な層（空・HUD・ロゴ）はキャッシュし、変化する部分だけ描き直す。
-// ステージ3でダンジョン・戦闘・スロットの画面に置き換える。
+// 奥壁の液晶画面。ゲームの状態（src/game/game.ts）を読んで毎フレーム（最大30fps）描き直す。
 import * as THREE from 'three';
+import type { Game } from '../game/game.ts';
+import { DUNGEON_NAMES, ENEMY, FLOORS_PER_DUNGEON, ORBS_FOR_WHEEL, MAX_STOCK, SLOT_SYMBOLS, type Loot, type StepCell } from '../game/rules.ts';
 import { LANES } from '../physics/layout.ts';
+import {
+  JP, LATIN, bigText, drawChest, drawDragonMark, drawEnemy, drawHero, drawMedalIcon, drawOrb, drawSlotSymbol,
+  dungeonStrip, goldFrame, goldGrad, roundRect,
+} from './art.ts';
 import { canvas, type Ctx } from './canvasKit.ts';
 
 const W = 1024;
 const H = 768;
-const JP = '"Zen Antique", "Hiragino Mincho ProN", serif';
-const LATIN = 'Cinzel, Georgia, serif';
+const TOP = 124; // HUD の下
+const BOTTOM = H - 86; // レーンのマークの上
+const TILE = 170;
+const HERO_X = 250;
+const FLOOR_Y = 596;
 
-function goldGrad(ctx: Ctx, y0: number, y1: number) {
-  const g = ctx.createLinearGradient(0, y0, 0, y1);
-  g.addColorStop(0, '#fff6c8');
-  g.addColorStop(0.45, '#f1c14e');
-  g.addColorStop(0.55, '#b87a18');
-  g.addColorStop(1, '#ffe08a');
-  return g;
-}
+const ease = (x: number) => 1 - (1 - Math.min(1, Math.max(0, x))) ** 3;
+const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 
-function roundRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: number) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
-
-function goldFrame(ctx: Ctx, x: number, y: number, w: number, h: number) {
-  roundRect(ctx, x, y, w, h, 10);
-  ctx.fillStyle = 'rgba(40,18,4,0.82)';
-  ctx.fill();
-  ctx.lineWidth = 6;
-  ctx.strokeStyle = goldGrad(ctx, y, y + h);
-  ctx.stroke();
-  roundRect(ctx, x + 6, y + 6, w - 12, h - 12, 6);
-  ctx.lineWidth = 1.5;
-  ctx.strokeStyle = 'rgba(255,230,160,0.6)';
-  ctx.stroke();
-}
-
-/** オリジナルの主人公（羽根飾りの兜の剣士）の肖像 */
-function portrait(ctx: Ctx, x: number, y: number, s: number) {
-  ctx.save();
-  ctx.translate(x, y);
-  const bg = ctx.createLinearGradient(0, 0, 0, s);
-  bg.addColorStop(0, '#5b8fd8');
-  bg.addColorStop(1, '#1d3570');
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, s, s);
-  // 肩
-  ctx.fillStyle = '#9aa7b8';
-  ctx.beginPath();
-  ctx.ellipse(s * 0.5, s * 1.02, s * 0.46, s * 0.3, 0, Math.PI, 0);
-  ctx.fill();
-  // 顔
-  ctx.fillStyle = '#f0c49a';
-  ctx.beginPath();
-  ctx.ellipse(s * 0.5, s * 0.58, s * 0.2, s * 0.24, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // 兜
-  ctx.fillStyle = '#c9d2de';
-  ctx.beginPath();
-  ctx.arc(s * 0.5, s * 0.5, s * 0.25, Math.PI, 0);
-  ctx.lineTo(s * 0.75, s * 0.58);
-  ctx.lineTo(s * 0.64, s * 0.5);
-  ctx.lineTo(s * 0.36, s * 0.5);
-  ctx.lineTo(s * 0.25, s * 0.58);
-  ctx.fill();
-  ctx.fillStyle = '#e2b24a';
-  ctx.fillRect(s * 0.47, s * 0.24, s * 0.06, s * 0.28);
-  // 羽根飾り
-  ctx.fillStyle = '#d8342c';
-  ctx.beginPath();
-  ctx.moveTo(s * 0.5, s * 0.26);
-  ctx.quadraticCurveTo(s * 0.9, s * 0.02, s * 0.95, s * 0.3);
-  ctx.quadraticCurveTo(s * 0.75, s * 0.2, s * 0.5, s * 0.3);
-  ctx.fill();
-  // 目
-  ctx.fillStyle = '#2a1a10';
-  ctx.fillRect(s * 0.4, s * 0.58, s * 0.06, s * 0.03);
-  ctx.fillRect(s * 0.54, s * 0.58, s * 0.06, s * 0.03);
-  ctx.restore();
-}
-
-function gem(ctx: Ctx, x: number, y: number, r: number, filled: boolean, hue: number) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.beginPath();
-  ctx.moveTo(0, -r);
-  ctx.lineTo(r * 0.8, 0);
-  ctx.lineTo(0, r);
-  ctx.lineTo(-r * 0.8, 0);
-  ctx.closePath();
-  if (filled) {
-    const g = ctx.createLinearGradient(-r, -r, r, r);
-    g.addColorStop(0, `hsl(${hue},100%,85%)`);
-    g.addColorStop(1, `hsl(${hue},90%,40%)`);
-    ctx.fillStyle = g;
-  } else {
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-  }
-  ctx.fill();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = '#f1c14e';
-  ctx.stroke();
-  ctx.restore();
+/** ルーレットの光が今どのマスにあるか（最後は target で止まる） */
+function rouletteIndex(n: number, target: number, t: number, dur: number, laps = 3) {
+  const total = target + n * laps;
+  return Math.floor(ease(t / dur) * total + 1e-6) % n;
 }
 
 export class LcdScreen {
   readonly texture: THREE.CanvasTexture;
-  private base: HTMLCanvasElement;
   private out: { cv: HTMLCanvasElement; ctx: Ctx };
+  private strips: HTMLCanvasElement[] = [];
   private lit = -1;
   private hitUntil = 0;
   private hitLane = -1;
-  private dirty = true;
-  hits = 0;
+  private lastDraw = 0;
+  private lastTickIdx = -1;
+  /** ルーレットの光が1マス動くたびに呼ばれる（効果音用） */
+  onTick: (() => void) | null = null;
 
   constructor() {
-    this.base = this.drawBase();
     this.out = canvas(W, H);
     this.texture = new THREE.CanvasTexture(this.out.cv);
     this.texture.colorSpace = THREE.SRGBColorSpace;
     this.texture.anisotropy = 4;
+    this.refreshBase();
   }
 
-  /** フォント読み込み後に静的な層を描き直す */
   refreshBase() {
-    this.base = this.drawBase();
-    this.dirty = true;
+    this.strips = [0, 1, 2, 3].map((k) => dungeonStrip(k, 1024, BOTTOM - TOP));
   }
 
-  private drawBase() {
-    const { cv, ctx } = canvas(W, H);
-    // 空と光の筋
-    const sky = ctx.createLinearGradient(0, 0, 0, H);
-    sky.addColorStop(0, '#2a62c4');
-    sky.addColorStop(0.55, '#8cc2f2');
-    sky.addColorStop(1, '#eaf5ff');
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, W, H);
+  setChecker(lane: number) {
+    this.lit = lane;
+  }
+
+  flashHit(lane: number, now: number) {
+    this.hitLane = lane;
+    this.hitUntil = now + 1000;
+  }
+
+  update(now: number, g: Game) {
+    if (now - this.lastDraw < 32) return;
+    this.lastDraw = now;
+    const ctx = this.out.ctx;
+    const t = now / 1000;
+    const md = g.mode;
     ctx.save();
-    ctx.translate(W / 2, 250);
-    for (let i = 0; i < 24; i++) {
-      ctx.rotate((Math.PI * 2) / 24);
-      ctx.fillStyle = `rgba(255,255,255,${i % 2 ? 0.1 : 0.2})`;
+    // 画面の揺れ（被弾・会心）
+    if (md.m === 'battle' && (md.heroHitT < 0.3 || (md.crit && md.hitT < 0.3))) {
+      ctx.translate((Math.random() - 0.5) * 16, (Math.random() - 0.5) * 12);
+    }
+    this.drawWorld(ctx, g, t);
+    ctx.restore();
+    this.drawOverlay(ctx, g, t);
+    this.drawHud(ctx, g, t);
+    this.drawLanes(ctx, now);
+    this.texture.needsUpdate = true;
+  }
+
+  // ---- 背景の世界（通路 or 戦闘） --------------------------------------------
+  private drawWorld(ctx: Ctx, g: Game, t: number) {
+    const md = g.mode;
+    const theme = g.s.dungeon % 4;
+    const strip = this.strips[theme];
+    const battle = md.m === 'battle' || md.m === 'victory' || md.m === 'retreat' || md.m === 'loot';
+    const camX = g.heroX * TILE;
+    // 奥の壁（パララックス）
+    const off = -((camX * 0.5) % strip.width);
+    for (let x = off; x < W; x += strip.width) ctx.drawImage(strip, x, TOP);
+    // たいまつ
+    for (let k = -1; k < 6; k++) {
+      const x = ((k * 256 - camX * 0.5) % (256 * 5) + 256 * 5) % (256 * 5) - 100;
+      const f = 0.8 + Math.sin(t * 13 + k * 3) * 0.1 + Math.sin(t * 7 + k) * 0.1;
+      const gl = ctx.createRadialGradient(x, TOP + 180, 0, x, TOP + 180, 120 * f);
+      gl.addColorStop(0, 'rgba(255,220,140,0.55)');
+      gl.addColorStop(1, 'rgba(255,160,60,0)');
+      ctx.fillStyle = gl;
+      ctx.fillRect(x - 130, TOP + 50, 260, 260);
+      ctx.fillStyle = '#ffdc80';
+      ctx.beginPath();
+      ctx.ellipse(x, TOP + 175, 9 * f, 18 * f, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#5a3a20';
+      ctx.fillRect(x - 5, TOP + 190, 10, 40);
+    }
+    if (battle) {
+      ctx.fillStyle = 'rgba(10,0,20,0.35)';
+      ctx.fillRect(0, TOP, W, BOTTOM - TOP);
+      return this.drawBattle(ctx, g, t);
+    }
+    // 盤面のマス
+    const b = g.s.board;
+    for (let i = 0; i < b.length; i++) {
+      const x = HERO_X + (i - g.heroX) * TILE;
+      if (x < -120 || x > W + 120) continue;
+      const tile = b[i];
+      const pg = ctx.createRadialGradient(x, FLOOR_Y - 6, 10, x, FLOOR_Y, 80);
+      pg.addColorStop(0, tile.kind === 'stairs' ? '#f8e39a' : '#b8aa94');
+      pg.addColorStop(1, tile.kind === 'stairs' ? '#8a6a20' : '#4a4034');
+      ctx.fillStyle = pg;
+      ctx.beginPath();
+      ctx.ellipse(x, FLOOR_Y, 70, 22, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,230,160,0.5)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      if (i === g.s.pos) continue;
+      if (tile.kind === 'chest') drawChest(ctx, x, FLOOR_Y - 6, 70, tile.done ? 1 : 0, tile.chest === 'slot' || tile.chest === 'orb');
+      else if (tile.kind === 'enemy' && !tile.done) drawEnemy(ctx, tile.enemy!, x, FLOOR_Y - 4, tile.enemy === 3 ? 150 : 80, t + i);
+      else if (tile.kind === 'stairs') {
+        ctx.fillStyle = '#1a0e06';
+        for (let k = 0; k < 4; k++) ctx.fillRect(x - 40 + k * 8, FLOOR_Y - 40 - k * 16, 80 - k * 16, 14);
+        bigText(ctx, g.s.floor + 1 >= FLOORS_PER_DUNGEON ? 'BOSS' : 'EXIT', x, FLOOR_Y - 110, 34);
+      }
+    }
+    // 主人公
+    const walking = md.m === 'move' || Math.abs(g.heroX - g.s.pos) > 0.01;
+    drawHero(ctx, HERO_X, FLOOR_Y - 4, 130, t, walking ? 'walk' : 'idle');
+    // 階層の見出しと進み具合
+    const name = `${DUNGEON_NAMES[g.s.dungeon % 4]}  ${g.isBossFloor ? 'ボスの間' : `地下${g.s.floor + 1}階`}`;
+    ctx.fillStyle = 'rgba(30,10,0,0.6)';
+    roundRect(ctx, 20, TOP + 14, 440, 52, 24);
+    ctx.fill();
+    ctx.fillStyle = '#ffe9a8';
+    ctx.font = `400 32px ${JP}`;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(name, 40, TOP + 41);
+    const prog = g.s.pos / (b.length - 1);
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    roundRect(ctx, 480, TOP + 30, 300, 20, 10);
+    ctx.fill();
+    ctx.fillStyle = goldGrad(ctx, TOP + 30, TOP + 50);
+    roundRect(ctx, 480, TOP + 30, Math.max(20, 300 * prog), 20, 10);
+    ctx.fill();
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  private drawBattle(ctx: Ctx, g: Game, t: number) {
+    const md = g.mode;
+    const kind = md.m === 'battle' || md.m === 'victory' || md.m === 'loot' ? md.kind : (g.s.battle?.kind ?? 0);
+    const boss = kind === 3;
+    const ex = 640, ey = FLOOR_Y + 10;
+    let alpha = 1;
+    let dy = 0;
+    if (md.m === 'victory') {
+      alpha = 1 - clamp01(md.t / 0.8);
+      dy = md.t * 40;
+    }
+    if (md.m !== 'loot') {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      const hitFlash = md.m === 'battle' && md.hitT < 0.12;
+      if (md.m === 'battle' && md.hitT < 0.25) ctx.translate(Math.sin(md.hitT * 90) * 10, 0);
+      drawEnemy(ctx, kind, ex, ey + dy, boss ? 300 : 230, t);
+      if (hitFlash) {
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 0.5;
+        drawEnemy(ctx, kind, ex, ey, boss ? 300 : 230, t);
+      }
+      ctx.restore();
+    }
+    drawHero(ctx, 230, FLOOR_Y + 30, 150, t, md.m === 'battle' && md.hitT < 0.3 ? 'attack' : 'idle');
+    if (md.m === 'battle') {
+      // 敵の HP
+      const bw = 420;
+      ctx.fillStyle = 'rgba(20,0,10,0.7)';
+      roundRect(ctx, ex - bw / 2 - 10, TOP + 20, bw + 20, 70, 12);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = `400 28px ${JP}`;
+      ctx.textAlign = 'center';
+      ctx.fillText(ENEMY[kind].name, ex, TOP + 50);
+      ctx.fillStyle = '#300';
+      ctx.fillRect(ex - bw / 2, TOP + 62, bw, 18);
+      const hg = ctx.createLinearGradient(0, TOP + 62, 0, TOP + 80);
+      hg.addColorStop(0, '#ff8a6a');
+      hg.addColorStop(1, '#b01010');
+      ctx.fillStyle = hg;
+      ctx.fillRect(ex - bw / 2, TOP + 62, (bw * md.hp) / md.max, 18);
+      ctx.textAlign = 'left';
+      // ダメージの数字
+      if (md.hitT < 0.8) {
+        const k = md.hitT / 0.8;
+        ctx.globalAlpha = 1 - k;
+        bigText(ctx, `${md.lastDmg}`, ex + 60, ey - (boss ? 330 : 250) - k * 60, md.crit ? 96 : 64, LATIN, 900,
+          md.crit ? '#ffef6a' : '#ffffff');
+        if (md.crit) bigText(ctx, '会心の一撃！', ex, ey - 120, 60, JP, 400, '#ffd23a');
+        ctx.globalAlpha = 1;
+      }
+      // 被弾
+      if (md.heroHitT < 0.6) {
+        ctx.fillStyle = `rgba(255,0,0,${0.35 * (1 - md.heroHitT / 0.6)})`;
+        ctx.fillRect(0, TOP, W, BOTTOM - TOP);
+        bigText(ctx, `-${ENEMY[kind].atk}`, 230, FLOOR_Y - 220 - md.heroHitT * 40, 60, LATIN, 900, '#ff6a5a');
+      }
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      roundRect(ctx, 250, BOTTOM - 54, 524, 44, 20);
+      ctx.fill();
+      ctx.fillStyle = '#ffe9a8';
+      ctx.font = `400 26px ${JP}`;
+      ctx.textAlign = 'center';
+      ctx.fillText('メダル1枚で攻撃！ チェッカーで会心！', W / 2, BOTTOM - 22);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  // ---- 手前に重ねる演出 --------------------------------------------------------
+  private drawOverlay(ctx: Ctx, g: Game, t: number) {
+    const md = g.mode;
+    switch (md.m) {
+      case 'map':
+        if (g.s.stock === 0) {
+          ctx.fillStyle = 'rgba(0,0,0,0.45)';
+          roundRect(ctx, 312, BOTTOM - 58, 400, 46, 22);
+          ctx.fill();
+          ctx.globalAlpha = 0.6 + 0.4 * Math.sin(t * 5);
+          ctx.fillStyle = '#fff3c4';
+          ctx.font = `400 28px ${JP}`;
+          ctx.textAlign = 'center';
+          ctx.fillText('光るレーンを狙え！', W / 2, BOTTOM - 25);
+          ctx.textAlign = 'left';
+          ctx.globalAlpha = 1;
+        }
+        break;
+      case 'roulette': {
+        const gold = md.kind === 'gold';
+        this.rouletteRow(ctx, gold ? 'GOLD ROULETTE' : 'SILVER ROULETTE', md.cells, md.target, md.t, md.dur, gold,
+          (c) => (c === 'gold' ? 'GOLD' : `${c}歩`));
+        break;
+      }
+      case 'move':
+        bigText(ctx, `あと ${md.left} 歩`, W / 2 + 120, TOP + 130, 54, JP, 400);
+        break;
+      case 'floor': {
+        ctx.fillStyle = `rgba(0,0,0,${Math.min(0.75, md.t)})`;
+        ctx.fillRect(0, TOP, W, BOTTOM - TOP);
+        const next = md.boss ? 'ボスの間へ！' : g.s.floor < 0 ? `${DUNGEON_NAMES[(g.s.dungeon) % 4]}へ` : `地下${g.s.floor + 2}階へ`;
+        bigText(ctx, md.boss ? 'WARNING' : 'FLOOR CLEAR', W / 2, 320, 90, LATIN, 900, md.boss ? '#ff4a3a' : undefined);
+        bigText(ctx, next, W / 2, 440, 56, JP, 400);
+        break;
+      }
+      case 'chest': {
+        const open = clamp01((md.t - 0.6) / 0.5);
+        ctx.fillStyle = 'rgba(0,0,0,0.4)';
+        ctx.fillRect(0, TOP, W, BOTTOM - TOP);
+        const shake = md.t < 0.6 ? Math.sin(md.t * 60) * 6 : 0;
+        drawChest(ctx, W / 2 + shake, 560, 230, open, md.item === 'slot' || md.item === 'orb');
+        if (open > 0) {
+          const y = 470 - ease(open) * 140;
+          if (md.item === 'orb') drawOrb(ctx, W / 2, y, 60, (g.s.orbs * 45) % 360);
+          else if (md.item === 'slot') drawDragonMark(ctx, W / 2, y, 64);
+          else drawMedalIcon(ctx, W / 2, y, 64, md.item.slice(1));
+        }
+        bigText(ctx, '宝箱を見つけた！', W / 2, TOP + 70, 52, JP, 400);
+        break;
+      }
+      case 'victory':
+        bigText(ctx, 'VICTORY!', W / 2, 330, 120);
+        bigText(ctx, `EXP +${ENEMY[md.kind].exp}`, W / 2, 450, 48, LATIN, 700, '#fff');
+        break;
+      case 'retreat':
+        ctx.fillStyle = 'rgba(40,0,0,0.6)';
+        ctx.fillRect(0, TOP, W, BOTTOM - TOP);
+        bigText(ctx, 'HPが尽きた…', W / 2, 330, 64, JP, 400, '#ffb0a0');
+        bigText(ctx, '一歩下がって出直しだ', W / 2, 430, 44, JP, 400, '#fff');
+        break;
+      case 'loot':
+        this.rouletteRow(ctx, '戦利品ルーレット', md.cells, md.target, md.t, md.dur, md.kind >= 2, (c) => c);
+        break;
+      case 'slot':
+        this.drawSlot(ctx, md, t);
+        break;
+      case 'orb': {
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(0, TOP, W, BOTTOM - TOP);
+        const k = ease(md.t / 0.6);
+        const glow = ctx.createRadialGradient(W / 2, 380, 0, W / 2, 380, 220);
+        glow.addColorStop(0, 'rgba(255,255,220,0.8)');
+        glow.addColorStop(1, 'rgba(255,255,220,0)');
+        ctx.fillStyle = glow;
+        ctx.fillRect(W / 2 - 240, 140, 480, 480);
+        drawOrb(ctx, W / 2, 380, 90 * k, ((g.s.orbs - 1) * 45) % 360);
+        bigText(ctx, `宝玉 ${g.s.orbs} / ${ORBS_FOR_WHEEL}`, W / 2, 560, 60, JP, 400);
+        break;
+      }
+      case 'wheelIntro': {
+        const on = Math.floor(md.t * 8) % 2 === 0;
+        ctx.fillStyle = on ? 'rgba(255,40,20,0.35)' : 'rgba(255,200,40,0.3)';
+        ctx.fillRect(0, TOP, W, BOTTOM - TOP);
+        drawDragonMark(ctx, W / 2, 300, 110 + Math.sin(md.t * 10) * 6);
+        bigText(ctx, md.reason === 'chain' ? '連チャン！' : 'BIG ROULETTE', W / 2, 470, md.reason === 'chain' ? 90 : 96,
+          md.reason === 'chain' ? JP : LATIN, md.reason === 'chain' ? 400 : 900);
+        bigText(ctx, md.reason === 'orb' ? '宝玉が8つ揃った！' : md.reason === 'slot' ? '竜が3つ揃った！' : `${md.spins + 1}回目の大ルーレット`,
+          W / 2, 570, 44, JP, 400, '#fff');
+        break;
+      }
+      case 'wheel':
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        ctx.fillRect(0, TOP, W, BOTTOM - TOP);
+        bigText(ctx, '大ルーレット回転中！', W / 2, 330, 64, JP, 400);
+        bigText(ctx, '竜マークで連チャン', W / 2, 440, 44, JP, 400, '#ffd0a0');
+        break;
+      case 'get':
+        this.drawGet(ctx, md.amount, md.label, md.t);
+        break;
+      case 'battle':
+        break;
+    }
+    // チェッカー当たり（戦闘以外は保留が増える）
+    if (performance.now() < this.hitUntil && md.m !== 'battle') {
+      const k = 1 - (this.hitUntil - performance.now()) / 1000;
+      ctx.save();
+      ctx.globalAlpha = 1 - k * k;
+      bigText(ctx, 'CHECKER!', W / 2, TOP + 150 - k * 30, 80);
+      ctx.restore();
+    }
+  }
+
+  private rouletteRow<T extends StepCell | Loot>(ctx: Ctx, title: string, cells: T[], target: number, t: number, dur: number, gold: boolean, label: (c: T) => string | number) {
+    const n = cells.length;
+    const idx = t < 0 ? -1 : rouletteIndex(n, target, t, dur);
+    if (idx !== this.lastTickIdx && t < dur) this.onTick?.();
+    this.lastTickIdx = idx;
+    const stopped = t >= dur;
+    const cw = Math.min(118, 900 / n);
+    const x0 = W / 2 - (cw * n) / 2;
+    goldFrame(ctx, x0 - 30, 250, cw * n + 60, 250, gold ? 'rgba(90,60,0,0.9)' : 'rgba(30,30,50,0.9)');
+    bigText(ctx, title, W / 2, 222, 58, /[A-Z]/.test(title) ? LATIN : JP, /[A-Z]/.test(title) ? 900 : 400,
+      gold ? undefined : '#e8eef8');
+    for (let i = 0; i < n; i++) {
+      const x = x0 + i * cw;
+      const on = i === idx;
+      const blink = stopped && on && Math.floor(t * 10) % 2 === 0;
+      const cg = ctx.createLinearGradient(0, 290, 0, 460);
+      if (on) {
+        cg.addColorStop(0, blink ? '#ffffff' : '#fff2a0');
+        cg.addColorStop(1, '#ff9a20');
+      } else {
+        cg.addColorStop(0, gold ? '#7a5a10' : '#4a5470');
+        cg.addColorStop(1, gold ? '#3a2400' : '#1a2034');
+      }
+      ctx.fillStyle = cg;
+      roundRect(ctx, x + 6, 290, cw - 12, 170, 12);
+      ctx.fill();
+      ctx.strokeStyle = on ? '#fff' : '#b89a50';
+      ctx.lineWidth = on ? 5 : 2;
+      ctx.stroke();
+      const c = cells[i];
+      const cx = x + cw / 2;
+      if (c === 'orb') drawOrb(ctx, cx, 375, cw * 0.3, 280);
+      else if (c === 'slot') drawDragonMark(ctx, cx, 375, cw * 0.32);
+      else if (typeof c === 'number' && title.includes('戦利品')) drawMedalIcon(ctx, cx, 375, cw * 0.34, String(c));
+      else {
+        const s = String(label(c));
+        bigText(ctx, s, cx, 375, s === 'GOLD' ? cw * 0.3 : cw * 0.38, s === 'GOLD' ? LATIN : JP, s === 'GOLD' ? 900 : 400,
+          s === 'GOLD' ? undefined : on ? '#5a1a00' : '#fff');
+      }
+    }
+  }
+
+  private drawSlot(ctx: Ctx, md: Extract<Game['mode'], { m: 'slot' }>, t: number) {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, TOP, W, BOTTOM - TOP);
+    bigText(ctx, md.jackpot ? 'JACKPOT SLOT' : 'TREASURE SLOT', W / 2, TOP + 70, 64);
+    const stops = [1.4, 2.0, 2.9];
+    const rw = 210, rh = 250, gap = 24;
+    const x0 = W / 2 - (rw * 3 + gap * 2) / 2;
+    goldFrame(ctx, x0 - 24, 230, rw * 3 + gap * 2 + 48, rh + 48, 'rgba(40,10,0,0.95)');
+    for (let r = 0; r < 3; r++) {
+      const x = x0 + r * (rw + gap);
+      ctx.save();
+      roundRect(ctx, x, 254, rw, rh, 10);
+      const bg = ctx.createLinearGradient(0, 254, 0, 254 + rh);
+      bg.addColorStop(0, '#9a9aa8');
+      bg.addColorStop(0.5, '#ffffff');
+      bg.addColorStop(1, '#9a9aa8');
+      ctx.fillStyle = bg;
+      ctx.fill();
+      ctx.clip();
+      const stopped = md.t >= stops[r];
+      if (stopped) {
+        const bounce = Math.max(0, 1 - (md.t - stops[r]) * 6) * Math.sin((md.t - stops[r]) * 40) * 12;
+        drawSlotSymbol(ctx, md.reels[r], x + rw / 2, 254 + rh / 2 + bounce, 78);
+      } else {
+        const off = (md.t * 14 + r * 1.7) % SLOT_SYMBOLS.length;
+        for (let k = -1; k <= 1; k++) {
+          const i = (Math.floor(off) + k + SLOT_SYMBOLS.length * 4) % SLOT_SYMBOLS.length;
+          const y = 254 + rh / 2 + (k - (off % 1)) * 170;
+          drawSlotSymbol(ctx, SLOT_SYMBOLS[i], x + rw / 2, y, 70);
+        }
+      }
+      ctx.restore();
+    }
+    const reach = md.t >= stops[1] && md.t < stops[2] && md.reels[0] === md.reels[1];
+    if (reach && Math.floor(t * 8) % 2 === 0) bigText(ctx, 'リーチ！', W / 2, 590, 64, JP, 400, '#ff5a3a');
+    if (md.t >= stops[2]) {
+      const [a, b, c] = md.reels;
+      if (a === b && b === c) bigText(ctx, a === 'dragon' ? '竜が揃った！！' : '揃った！', W / 2, 590, 64, JP, 400);
+    }
+  }
+
+  /** 獲得枚数の大きな表示（数字が回って止まる） */
+  private drawGet(ctx: Ctx, amount: number, label: string, t: number) {
+    const bg = ctx.createLinearGradient(0, TOP, 0, BOTTOM);
+    bg.addColorStop(0, 'rgba(40,90,200,0.85)');
+    bg.addColorStop(1, 'rgba(220,240,255,0.85)');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, TOP, W, BOTTOM - TOP);
+    ctx.save();
+    ctx.translate(W / 2, 380);
+    for (let i = 0; i < 20; i++) {
+      ctx.rotate((Math.PI * 2) / 20 + t * 0.02);
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
       ctx.beginPath();
       ctx.moveTo(0, 0);
-      ctx.lineTo(-60, 900);
-      ctx.lineTo(60, 900);
+      ctx.lineTo(-40, 700);
+      ctx.lineTo(40, 700);
       ctx.fill();
     }
     ctx.restore();
-    const glow = ctx.createRadialGradient(W / 2, 250, 0, W / 2, 250, 300);
-    glow.addColorStop(0, 'rgba(255,255,240,0.9)');
-    glow.addColorStop(1, 'rgba(255,255,240,0)');
-    ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, W, H);
-    // 雲
+    const shown = Math.round(amount * ease(t / 0.9));
+    const digits = String(shown).padStart(Math.max(3, String(amount).length), '0');
+    bigText(ctx, label, W / 2, 230, 48, JP, 400, '#fff');
+    bigText(ctx, 'GET', 150, 390, 64);
+    bigText(ctx, digits, W / 2 + 10, 390, 170);
+    bigText(ctx, 'MEDALS', 880, 420, 40);
+    // 降ってくるメダル
     for (let i = 0; i < 14; i++) {
-      const x = (i / 13) * W, y = 600 + Math.sin(i * 2.1) * 30;
-      const g = ctx.createRadialGradient(x, y, 0, x, y, 120);
-      g.addColorStop(0, 'rgba(255,255,255,0.95)');
-      g.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.fillStyle = g;
-      ctx.fillRect(x - 130, y - 130, 260, 260);
+      const x = ((i * 137) % 1000) + 12;
+      const y = TOP + ((t * 300 + i * 91) % (BOTTOM - TOP));
+      drawMedalIcon(ctx, x, y, 16, '');
     }
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    roundRect(ctx, 262, 540, 500, 56, 26);
+    ctx.fill();
+    ctx.fillStyle = '#fff3c4';
+    ctx.font = `400 30px ${JP}`;
+    ctx.textAlign = 'center';
+    ctx.fillText('竜の口から払い出し！', W / 2, 579);
+    ctx.textAlign = 'left';
+  }
 
-    // 上部 HUD: 左に主人公、右に宝玉と予告
-    goldFrame(ctx, 12, 10, 430, 108);
-    portrait(ctx, 24, 20, 88);
+  // ---- 上部の HUD ------------------------------------------------------------
+  private drawHud(ctx: Ctx, g: Game, t: number) {
+    goldFrame(ctx, 12, 8, 430, 110);
+    drawHero(ctx, 68, 108, 70, t, 'idle');
     ctx.strokeStyle = '#f1c14e';
     ctx.lineWidth = 3;
-    ctx.strokeRect(24, 20, 88, 88);
+    ctx.strokeRect(24, 18, 88, 90);
     ctx.fillStyle = '#fff';
     ctx.font = `700 30px ${LATIN}`;
-    ctx.fillText('Lv 1', 128, 52);
-    ctx.font = `400 24px ${JP}`;
+    ctx.fillText(`Lv ${g.s.lv}`, 128, 50);
+    ctx.font = `400 22px ${JP}`;
     ctx.fillStyle = '#ffe9a8';
-    ctx.fillText('見習い剣士', 220, 52);
+    ctx.fillText(g.s.loop > 0 ? `${g.s.loop + 1}周目の勇者` : '見習い剣士', 240, 50);
     ctx.fillStyle = '#123';
-    roundRect(ctx, 128, 70, 300, 30, 6);
+    roundRect(ctx, 128, 68, 300, 30, 6);
     ctx.fill();
-    const hp = ctx.createLinearGradient(0, 70, 0, 100);
-    hp.addColorStop(0, '#9dff7a');
-    hp.addColorStop(1, '#1f9a2c');
+    const hpk = g.s.hp / g.maxHp;
+    const hp = ctx.createLinearGradient(0, 68, 0, 98);
+    hp.addColorStop(0, hpk > 0.3 ? '#9dff7a' : '#ff9a7a');
+    hp.addColorStop(1, hpk > 0.3 ? '#1f9a2c' : '#b01010');
     ctx.fillStyle = hp;
-    roundRect(ctx, 131, 73, 294, 24, 5);
+    roundRect(ctx, 131, 71, Math.max(8, 294 * hpk), 24, 5);
     ctx.fill();
     ctx.fillStyle = '#fff';
     ctx.font = `700 20px ${LATIN}`;
-    ctx.fillText('HP 120 / 120', 140, 92);
+    ctx.fillText(`HP ${g.s.hp} / ${g.maxHp}`, 140, 90);
 
-    goldFrame(ctx, 582, 10, 430, 108);
+    goldFrame(ctx, 582, 8, 430, 110);
     ctx.font = `400 22px ${JP}`;
     ctx.fillStyle = '#ffe9a8';
-    ctx.fillText('宝玉', 600, 48);
-    for (let i = 0; i < 8; i++) gem(ctx, 680 + i * 40, 42, 15, false, i * 45);
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    roundRect(ctx, 600, 66, 396, 40, 6);
-    ctx.fill();
+    ctx.fillText('宝玉', 598, 46);
+    for (let i = 0; i < ORBS_FOR_WHEEL; i++) drawOrb(ctx, 672 + i * 41, 38, 15, (i * 45) % 360, i < g.s.orbs);
+    ctx.fillText('保留', 598, 96);
+    for (let i = 0; i < MAX_STOCK; i++) {
+      const on = i < g.s.stock;
+      ctx.beginPath();
+      ctx.arc(684 + i * 44, 88, 14, 0, Math.PI * 2);
+      const sg = ctx.createRadialGradient(684 + i * 44, 84, 2, 684 + i * 44, 88, 14);
+      sg.addColorStop(0, on ? '#fff' : '#444');
+      sg.addColorStop(1, on ? '#ff6a20' : '#1a1010');
+      ctx.fillStyle = sg;
+      ctx.fill();
+      ctx.strokeStyle = '#f1c14e';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
     ctx.fillStyle = '#ffe9a8';
-    ctx.font = `400 22px ${JP}`;
-    ctx.fillText('予告 ─ 迷宮の奥で何かが目覚める…', 612, 94);
-
-    // 中央の飾り枠（上辺のアーチ）
+    ctx.font = `700 22px ${LATIN}`;
+    ctx.fillText(`${DUNGEON_NAMES.length > 0 ? `D${(g.s.dungeon % 4) + 1}` : ''}`, 880, 96);
+    // 中央のアーチ
     ctx.strokeStyle = goldGrad(ctx, 0, 140);
     ctx.lineWidth = 8;
     ctx.beginPath();
     ctx.moveTo(442, 60);
     ctx.quadraticCurveTo(512, 150, 582, 60);
     ctx.stroke();
-
-    // ロゴ
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = `900 118px ${LATIN}`;
-    ctx.lineWidth = 16;
-    ctx.strokeStyle = '#2a1204';
-    ctx.strokeText('DRAGON', W / 2, 250);
-    ctx.fillStyle = goldGrad(ctx, 190, 310);
-    ctx.fillText('DRAGON', W / 2, 250);
-    ctx.font = `900 96px ${LATIN}`;
-    ctx.strokeText('HOARD', W / 2, 360);
-    ctx.fillStyle = goldGrad(ctx, 310, 410);
-    ctx.fillText('HOARD', W / 2, 360);
-    // 翼の飾り
-    for (const s of [-1, 1]) {
-      ctx.save();
-      ctx.translate(W / 2 + s * 330, 300);
-      ctx.scale(s, 1);
-      ctx.fillStyle = goldGrad(ctx, -80, 80);
-      for (let k = 0; k < 5; k++) {
-        ctx.beginPath();
-        ctx.ellipse(k * 26, -30 + k * 16, 70 - k * 8, 14, -0.5 + k * 0.1, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
-    }
-    // 帯
-    ctx.fillStyle = 'rgba(90,40,0,0.75)';
-    roundRect(ctx, 232, 428, 560, 62, 30);
-    ctx.fill();
-    ctx.strokeStyle = '#f1c14e';
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    ctx.fillStyle = '#fff3c4';
-    ctx.font = `400 36px ${JP}`;
-    ctx.fillText('第一の迷宮  地下一階', W / 2, 460);
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-    return cv;
   }
 
-  setChecker(lane: number) {
-    if (lane !== this.lit) {
-      this.lit = lane;
-      this.dirty = true;
-    }
-  }
-
-  flashHit(lane: number, now: number) {
-    this.hits++;
-    this.hitLane = lane;
-    this.hitUntil = now + 1400;
-    this.dirty = true;
-  }
-
-  update(now: number) {
+  // ---- 下端: レーンのマーク（チェッカー） --------------------------------------
+  private drawLanes(ctx: Ctx, now: number) {
     const hitting = now < this.hitUntil;
-    if (!this.dirty && !hitting) return;
-    this.dirty = false;
-    const { ctx } = this.out;
-    ctx.drawImage(this.base, 0, 0);
-    // チェッカー当たり
-    if (hitting) {
-      const k = 1 - (this.hitUntil - now) / 1400;
-      ctx.save();
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = `rgba(255,240,180,${0.5 * (1 - k)})`;
-      ctx.fillRect(0, 0, W, H);
-      ctx.translate(W / 2, 560);
-      ctx.scale(1 + (1 - k) * 0.3, 1 + (1 - k) * 0.3);
-      ctx.font = `900 84px ${LATIN}`;
-      ctx.lineWidth = 14;
-      ctx.strokeStyle = '#6a0a00';
-      ctx.strokeText('CHECKER!', 0, 0);
-      ctx.fillStyle = goldGrad(ctx, -40, 40);
-      ctx.fillText('CHECKER!', 0, 0);
-      ctx.restore();
-    } else {
-      ctx.save();
-      ctx.textAlign = 'center';
-      ctx.fillStyle = '#7a2a00';
-      ctx.font = `400 34px ${JP}`;
-      ctx.fillText(`光るレーンを狙え！  当たり ${this.hits}`, W / 2, 575);
-      ctx.restore();
-    }
-    // 下端: レーンのマーク（レーンの真上に並ぶ）
     const lw = W / LANES.count;
-    ctx.fillStyle = 'rgba(30,10,0,0.55)';
-    ctx.fillRect(0, H - 86, W, 86);
+    ctx.fillStyle = 'rgba(30,10,0,0.85)';
+    ctx.fillRect(0, BOTTOM, W, H - BOTTOM);
     for (let i = 0; i < LANES.count; i++) {
       const x = lw * (i + 0.5), y = H - 43;
       const on = i === this.lit || (hitting && i === this.hitLane);
       ctx.beginPath();
       ctx.arc(x, y, 32, 0, Math.PI * 2);
       if (on) {
-        const g = ctx.createRadialGradient(x, y, 0, x, y, 34);
-        g.addColorStop(0, '#fff');
-        g.addColorStop(0.4, '#ff5a3a');
-        g.addColorStop(1, '#8a0a00');
-        ctx.fillStyle = g;
+        const gg = ctx.createRadialGradient(x, y, 0, x, y, 34);
+        gg.addColorStop(0, '#fff');
+        gg.addColorStop(0.4, '#ff5a3a');
+        gg.addColorStop(1, '#8a0a00');
+        ctx.fillStyle = gg;
       } else {
         ctx.fillStyle = '#3a2a4a';
       }
@@ -326,7 +547,6 @@ export class LcdScreen {
       ctx.lineWidth = 5;
       ctx.beginPath();
       if (on) {
-        // 的
         ctx.arc(x, y, 16, 0, Math.PI * 2);
         ctx.moveTo(x - 26, y); ctx.lineTo(x + 26, y);
         ctx.moveTo(x, y - 26); ctx.lineTo(x, y + 26);
@@ -336,6 +556,5 @@ export class LcdScreen {
       }
       ctx.stroke();
     }
-    this.texture.needsUpdate = true;
   }
 }

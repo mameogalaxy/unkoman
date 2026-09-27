@@ -3,16 +3,7 @@ import * as THREE from 'three';
 import { canvas, tex } from './canvasKit.ts';
 import { drawDragon } from './medalTexture.ts';
 
-export interface WheelCell {
-  medals: number;
-  /** 竜マーク付き = 止まると連チャン */
-  dragon: boolean;
-}
-
-// 500/300/200 が各2マス（竜マーク）、100 が6マス、50 が2マス
-export const WHEEL_CELLS: WheelCell[] = [
-  500, 100, 50, 300, 100, 200, 100, 500, 100, 50, 300, 100, 200, 100,
-].map((m) => ({ medals: m, dragon: m >= 200 }));
+import { WHEEL_CELLS } from '../game/wheelCells.ts';
 
 const CELL_STYLE: Record<number, [string, string]> = {
   500: ['#c0182a', '#5a0710'],
@@ -94,6 +85,18 @@ export class GiantWheel {
   private bulbCount = 28;
   private color = new THREE.Color();
   angle = 0;
+  private spinFrom = 0;
+  private spinTo = 0;
+  private spinT = -1;
+  private spinDur = 6.5;
+  private onStop: (() => void) | null = null;
+  /** 盤面が1マス進むたびに呼ぶ（効果音用） */
+  onTick: (() => void) | null = null;
+  private lastCell = 0;
+  private flashT = 99;
+  get spinning() { return this.spinT >= 0; }
+  /** 止まってから少しの間（獲得表示の間もカメラを寄せておく） */
+  get recentlyStopped() { return this.spinT >= 0 || this.flashT < 3.2; }
 
   constructor(readonly radius: number, envMap: THREE.Texture | null) {
     const R = radius;
@@ -156,12 +159,44 @@ export class GiantWheel {
     this.group.add(ptrGem);
   }
 
-  /** 電球の点滅（ステージ4で演出ごとにパターンを増やす） */
-  update(t: number) {
+  /** target 番のマスが上の指針で止まるように回す */
+  spin(target: number, onStop: () => void) {
+    const step = (Math.PI * 2) / WHEEL_CELLS.length;
+    const full = Math.PI * 2;
+    const base = Math.ceil(this.angle / full) * full;
+    this.spinFrom = this.angle;
+    // 止まる直前にわずかな揺らぎ（マスの中央からずらす）
+    this.spinTo = base + full * 5 + target * step + (Math.random() - 0.5) * step * 0.5;
+    this.spinT = 0;
+    this.onStop = onStop;
+  }
+
+  update(t: number, dt: number) {
+    if (this.spinT >= 0) {
+      this.spinT += dt;
+      const k = Math.min(1, this.spinT / this.spinDur);
+      // 最後はゆっくり（4次の ease-out）
+      this.angle = this.spinFrom + (this.spinTo - this.spinFrom) * (1 - (1 - k) ** 4);
+      const cell = Math.floor(this.angle / ((Math.PI * 2) / WHEEL_CELLS.length) + 0.5);
+      if (cell !== this.lastCell) {
+        this.lastCell = cell;
+        this.onTick?.();
+      }
+      if (k >= 1) {
+        this.spinT = -1;
+        this.flashT = 0;
+        const cb = this.onStop;
+        this.onStop = null;
+        cb?.();
+      }
+    }
+    this.flashT += dt;
     const n = this.bulbCount;
+    const fast = this.spinT >= 0;
     for (let i = 0; i < n; i++) {
-      const on = (Math.floor(t * 8) + i) % 4 === 0;
-      const k = on ? 2.2 : 0.45;
+      let k: number;
+      if (this.flashT < 2.5) k = Math.floor(this.flashT * 10) % 2 === 0 ? 2.6 : 0.3; // 止まった瞬間は全点滅
+      else k = (Math.floor(t * (fast ? 30 : 8)) + i) % 4 === 0 ? 2.2 : 0.45;
       this.bulbs.setColorAt(i, this.color.setRGB(1.0 * k, 0.78 * k, 0.4 * k));
     }
     this.bulbs.instanceColor!.needsUpdate = true;

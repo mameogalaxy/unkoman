@@ -67,3 +67,30 @@ html, body {
   touch-action: manipulation;
 }
 #bar button:active { background: rgba(120, 90, 30, 0.9); }
+#credits {
+  position: fixed;
+  top: max(8px, env(safe-area-inset-top));
+  right: 8px;
+  font: 700 16px -apple-system, 'Hiragino Sans', sans-serif;
+  color: #ffe9a8;
+  background: rgba(40, 18, 4, 0.8);
+  border: 1px solid rgba(255, 210, 120, 0.6);
+  padding: 6px 10px;
+  border-radius: 8px;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+#toast {
+  position: fixed;
+  left: 50%;
+  top: 40%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+  pointer-events: none;
+}
+[hidden] { display: none !important; }

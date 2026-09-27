@@ -1,5 +1,5 @@
 // Worker とインラインの両方から使う、MedalWorld をコマンドで動かす薄い層
-import type { Command, Snapshot } from './protocol.ts';
+import type { Command, FieldLayout, Snapshot } from './protocol.ts';
 import { seedField, settle } from './seed.ts';
 import { MedalWorld, type DropResult, type PhysicsOptions } from './world.ts';
 
@@ -7,15 +7,25 @@ export class Engine {
   w: MedalWorld;
   private drops: Snapshot['drops'] = [];
 
-  constructor(capacity: number, opts: Partial<PhysicsOptions>, count: number, seed: number) {
-    this.w = this.create(capacity, opts, count, seed);
+  constructor(capacity: number, opts: Partial<PhysicsOptions>, count: number, seed: number, field?: FieldLayout | null) {
+    this.w = this.create(capacity, opts, count, seed, field);
   }
 
-  private create(capacity: number, opts: Partial<PhysicsOptions>, count: number, seed: number) {
+  private create(capacity: number, opts: Partial<PhysicsOptions>, count: number, seed: number, field?: FieldLayout | null) {
     const w = new MedalWorld(capacity, opts);
     w.onDrop = (r: DropResult, x: number, z: number) => this.drops.push({ r, x, z });
-    seedField(w, count, seed);
-    settle(w, 1.2);
+    if (field && field.pos.length >= 3) {
+      // 保存された配置を復元（少しだけ浮かせて落ち着かせる）
+      const n = Math.min(capacity, Math.floor(field.pos.length / 3));
+      for (let i = 0; i < n; i++) {
+        const p = field.pos, q = field.quat;
+        w.addMedal(p[i * 3], p[i * 3 + 1] + 0.01, p[i * 3 + 2], { x: q[i * 4], y: q[i * 4 + 1], z: q[i * 4 + 2], w: q[i * 4 + 3] });
+      }
+      settle(w, 0.3);
+    } else {
+      seedField(w, count, seed);
+      settle(w, 1.2);
+    }
     this.drops.length = 0;
     w.laneHits.length = 0;
     return w;

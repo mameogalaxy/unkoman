@@ -10,8 +10,8 @@ import type { LcdScreen } from './screen.ts';
 import { GiantWheel } from './wheel.ts';
 
 /** 八角形の中心（中央の塔の位置） */
-export const TOWER_CENTER = new THREE.Vector3(0, 0, -64);
-export const WHEEL_POS = new THREE.Vector3(0, 66, -52);
+export const TOWER_CENTER = new THREE.Vector3(0, 0, -86); // 幅42のステーション8台が重ならない距離
+export const WHEEL_POS = new THREE.Vector3(0, 66, -58);
 export const WHEEL_RADIUS = 17;
 
 export interface Cabinet {
@@ -230,7 +230,7 @@ function stationShell(m: Mats, screenMat: THREE.Material, envMap: THREE.Texture 
   g.add(sg);
   // フード
   const hood = new THREE.Mesh(hoodGeometry(), m.hood);
-  hood.position.set(0, 0, BACK_WALL.frontZ - 1.2);
+  hood.position.set(0, 0, BACK_WALL.frontZ - 2.4); // 前面が液晶とほぼ同じ面になるように
   hood.receiveShadow = true;
   g.add(hood);
   // フード上の紋章と金の縁
@@ -238,8 +238,8 @@ function stationShell(m: Mats, screenMat: THREE.Material, envMap: THREE.Texture 
   const cr = crest(envMap, 4.2);
   cr.position.set(0, top + 6.2, BACK_WALL.frontZ + 1.4);
   g.add(cr);
-  boxAt(g, SCREEN.width + 1.2, 0.8, 0.8, m.gold, 0, top + 0.4, BACK_WALL.frontZ + 0.9);
-  for (const s of [-1, 1]) boxAt(g, 0.8, SCREEN.height + 0.8, 0.8, m.gold, s * (SCREEN.width / 2 + 0.6), SCREEN.bottomY + SCREEN.height / 2, BACK_WALL.frontZ + 0.9);
+  boxAt(g, SCREEN.width + 2.1, 0.7, 0.6, m.gold, 0, top + 0.45, BACK_WALL.frontZ + 0.3);
+  for (const s of [-1, 1]) boxAt(g, 0.6, SCREEN.height + 0.8, 0.6, m.gold, s * (SCREEN.width / 2 + 0.75), SCREEN.bottomY + SCREEN.height / 2, BACK_WALL.frontZ + 0.3);
 
   // 縁のオレンジのランプ管（ステーションの境目から塔へ）
   for (const s of [-1, 1]) {

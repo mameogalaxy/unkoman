@@ -6,7 +6,8 @@
     "dev": "vite --host",
     "build": "tsc && vite build",
     "preview": "vite preview --host",
-    "bench": "node --experimental-strip-types scripts/bench.ts"
+    "bench": "node --experimental-strip-types scripts/bench.ts",
+    "sim": "node --experimental-strip-types scripts/sim-game.ts"
   },
   "keywords": [],
   "author": "",

@@ -6,6 +6,12 @@ export interface MedalSpawn {
   wx: number; wy: number; wz: number;
 }
 
+/** 保存用のメダル配置（位置 xyz と姿勢 xyzw を並べたもの） */
+export interface FieldLayout {
+  pos: number[];
+  quat: number[];
+}
+
 export type Command =
   | { t: 'add'; m: MedalSpawn }
   | { t: 'feed'; x: number; spin: number }
@@ -13,7 +19,7 @@ export type Command =
   | { t: 'reset'; count: number; seed: number };
 
 export type ToWorker =
-  | { type: 'init'; capacity: number; opts: Partial<PhysicsOptions>; count: number; seed: number }
+  | { type: 'init'; capacity: number; opts: Partial<PhysicsOptions>; count: number; seed: number; field?: FieldLayout | null }
   | { type: 'step'; steps: number; cmds: Command[] };
 
 export interface Snapshot {

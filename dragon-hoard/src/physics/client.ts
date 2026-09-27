@@ -1,5 +1,5 @@
 // メインスレッド側の物理クライアント。既定は Worker、?inline=1 で同じスレッドで動かす。
-import type { Command, FromWorker, MedalSpawn, Snapshot, ToWorker } from './protocol.ts';
+import type { Command, FieldLayout, FromWorker, MedalSpawn, Snapshot, ToWorker } from './protocol.ts';
 import type { PhysicsOptions } from './world.ts';
 
 export interface ClientConfig {
@@ -8,6 +8,7 @@ export interface ClientConfig {
   seed: number;
   opts: Partial<PhysicsOptions>;
   inline: boolean;
+  field?: FieldLayout | null;
 }
 
 export class PhysicsClient {
@@ -43,14 +44,14 @@ export class PhysicsClient {
         this.inFlight = false;
         if (!this.snap) void this.startInline();
       };
-      this.send({ type: 'init', capacity: cfg.capacity, opts: cfg.opts, count: cfg.count, seed: cfg.seed });
+      this.send({ type: 'init', capacity: cfg.capacity, opts: cfg.opts, count: cfg.count, seed: cfg.seed, field: cfg.field });
     }
   }
 
   private async startInline() {
     const [{ Engine }, { initRapier }] = await Promise.all([import('./engine.ts'), import('./world.ts')]);
     await initRapier();
-    this.engine = new Engine(this.cfg.capacity, this.cfg.opts, this.cfg.count, this.cfg.seed);
+    this.engine = new Engine(this.cfg.capacity, this.cfg.opts, this.cfg.count, this.cfg.seed, this.cfg.field);
     this.receive(this.engine.snapshot(0, 0), true);
   }
 

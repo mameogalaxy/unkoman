@@ -7,6 +7,8 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Sfx } from './audio.ts';
+import { Game, START_CREDITS } from './game/game.ts';
+import { clearSave, loadSave, writeSave } from './game/save.ts';
 import { PhysicsClient } from './physics/client.ts';
 import { BACK_WALL, FIELD, LANES } from './physics/layout.ts';
 import { buildCabinet, WHEEL_POS } from './render/cabinet.ts';
@@ -79,12 +81,14 @@ function arcadeEnvironment() {
 
 const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 1, 600);
 const CAMS = [
-  { name: '座席', pos: new THREE.Vector3(0, 30, 22), look: new THREE.Vector3(0, 15, -20) },
+  { name: '座席', pos: new THREE.Vector3(0, 25.5, 11), look: new THREE.Vector3(0, 15.5, -22) },
   { name: 'フィールド', pos: new THREE.Vector3(0, 40, 14), look: new THREE.Vector3(0, 0, -13) },
   { name: 'ルーレット', pos: new THREE.Vector3(0, 60, 10), look: WHEEL_POS.clone() },
   { name: '自由', pos: new THREE.Vector3(30, 50, 70), look: new THREE.Vector3(0, 20, -30) },
 ];
 let camIndex = Number(qs.get('cam') ?? 0) % CAMS.length;
+/** 大ルーレットの演出中のカメラ（盤面の正面に寄る） */
+const WHEEL_CAM = { pos: new THREE.Vector3(0, WHEEL_POS.y - 4, WHEEL_POS.z + 52), look: WHEEL_POS.clone() };
 const controls = new OrbitControls(camera, canvasEl);
 controls.enabled = false;
 const camTarget = { pos: CAMS[camIndex].pos.clone(), look: CAMS[camIndex].look.clone() };
@@ -124,14 +128,19 @@ function resize() {
   fitCamera();
 }
 
-// ---- 物理 ------------------------------------------------------------------
+// ---- セーブデータ・物理・ゲーム ------------------------------------------------
+const saved = qs.get('fresh') === '1' ? null : loadSave();
+let game = new Game(saved?.game);
 const physics = new PhysicsClient({
   capacity: CAPACITY,
   count: INITIAL,
   seed: 1,
   opts: { dt: 1 / HZ },
   inline: qs.get('inline') === '1',
+  field: saved?.field,
 });
+/** フィールドのメダルがこれ以上あるとホッパーは払い出しを待つ */
+const HOPPER_WAIT_COUNT = 480;
 const sfx = new Sfx();
 const screen = new LcdScreen();
 let fed = 0;
@@ -181,7 +190,14 @@ async function main() {
   physics.onSnapshot = (s) => {
     wins = s.wins;
     losses = s.losses;
-    for (const d of s.drops) (d.r === 'win' ? sfx.win(d.x) : sfx.lose(d.x));
+    for (const d of s.drops) {
+      if (d.r === 'win') {
+        sfx.win(d.x);
+        game.won(1);
+      } else {
+        sfx.lose(d.x);
+      }
+    }
     for (const im of s.impacts) sfx.impact(im.dv, im.x);
     const now = performance.now();
     for (const lane of s.laneHits) {
@@ -189,11 +205,20 @@ async function main() {
         checkerHits++;
         screen.flashHit(lane, now);
         sfx.checker();
-        // 仮: 当たりで3枚払い出し（ステージ3で歩数ルーレットに置き換える）
-        physics.payout(3);
+        game.checker();
       }
     }
   };
+  screen.onTick = () => sfx.game('tick');
+  cabinet.wheel.onTick = () => sfx.game('tick');
+
+  // 保存（5秒ごと + 画面を離れるとき）
+  const save = () => writeSave(game.serialize(), physics.snap);
+  setInterval(save, 5000);
+  addEventListener('pagehide', save);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') save();
+  });
 
   // ---- 入力 ----------------------------------------------------------------
   // 画面を左右にドラッグして狙いを動かし、タップで投入
@@ -226,15 +251,30 @@ async function main() {
     if (e.key === 'ArrowRight') aimX = Math.min(13.6, aimX + 1);
     if (e.key === ' ') feed();
   });
+  const toast = document.getElementById('toast')!;
+  let toastTimer = 0;
+  function showToast(text: string) {
+    toast.textContent = text;
+    toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => (toast.hidden = true), 1800);
+  }
   function feed() {
+    if (!game.canFeed()) {
+      showToast('手持ちのメダルがありません。「メダル補充」で借りられます');
+      return;
+    }
     physics.feed(aimX + (Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 4);
+    game.fed();
     fed++;
   }
 
+  const creditsEl = document.getElementById('credits')!;
   let auto = false;
   let autoAcc = 0;
-  let showHud = true;
+  let showHud = qs.get('hud') === '1' || qs.get('debug') === '1';
   const hud = document.getElementById('hud')!;
+  hud.hidden = !showHud;
   document.getElementById('bar')!.addEventListener('click', (e) => {
     const btn = (e.target as HTMLElement).closest('button');
     if (!btn) return;
@@ -245,10 +285,28 @@ async function main() {
         auto = !auto;
         btn.textContent = auto ? '連射 ON' : '連射 OFF';
         break;
-      case 'payout': physics.payout(20); break;
+      case 'refill':
+        game.s.credits += START_CREDITS / 2;
+        showToast(`メダルを ${START_CREDITS / 2} 枚補充しました`);
+        break;
       case 'reset':
+        // 押し間違い防止: 3秒以内にもう一度押すと最初から
+        if (btn.dataset.armed !== '1') {
+          btn.dataset.armed = '1';
+          btn.textContent = 'もう一度で初期化';
+          setTimeout(() => {
+            btn.dataset.armed = '';
+            btn.textContent = '最初から';
+          }, 3000);
+          break;
+        }
+        btn.dataset.armed = '';
+        btn.textContent = '最初から';
+        clearSave();
+        game = new Game(null);
         physics.reset(INITIAL, (Math.random() * 1e9) | 0);
         fed = 0;
+        showToast('最初からはじめます');
         break;
       case 'cam':
         camIndex = (camIndex + 1) % CAMS.length;
@@ -312,15 +370,38 @@ async function main() {
       if (s.steps > 0) stepMs = stepMs * 0.9 + s.stepMs * 0.1;
     }
 
+    // ゲーム進行
+    game.update(dtFrame);
+    for (const e of game.events) {
+      if (e.t === 'sfx') sfx.game(e.name);
+      else if (e.t === 'wheelSpin') cabinet.wheel.spin(e.target, () => game.wheelStopped());
+    }
+    game.events.length = 0;
+    // 払い出し: ホッパーへ少しずつ渡す（フィールドが満杯なら待つ）
+    if (game.s.pendingPayout > 0 && s && s.payoutQueue < 4 && s.count < HOPPER_WAIT_COUNT) {
+      const n = Math.min(4, game.s.pendingPayout);
+      physics.payout(n);
+      game.s.pendingPayout -= n;
+    }
+    // 大ルーレットの間はカメラが寄る
+    const md = game.mode;
+    const wheelTime = md.m === 'wheelIntro' || md.m === 'wheel' || (md.m === 'get' && cabinet.wheel.recentlyStopped);
+    if (!controls.enabled) {
+      const c = wheelTime ? WHEEL_CAM : CAMS[camIndex];
+      camTarget.pos.copy(c.pos);
+      camTarget.look.copy(c.look);
+    }
+
     // 演出
     const lit = checkerLaneAt(t);
     screen.setChecker(lit);
-    screen.update(now);
+    screen.update(now, game);
     cabinet.checkerLamps.forEach((m, i) => m.color.setRGB(i === lit ? 4 : 0.35, i === lit ? 0.9 : 0.08, i === lit ? 0.3 : 0.05));
     cabinet.aim.position.x += (aimX - cabinet.aim.position.x) * Math.min(1, dtFrame * 18);
     const pulse = 0.75 + 0.25 * Math.sin(t * 3);
     cabinet.lampTubes.color.setRGB(3.2 * pulse, 1.3 * pulse, 0.25 * pulse);
-    cabinet.wheel.update(t);
+    cabinet.wheel.update(t, dtFrame);
+    creditsEl.textContent = `手持ち ${game.s.credits}枚` + (game.s.pendingPayout > 0 ? `  払い出し待ち ${game.s.pendingPayout}` : '');
 
     // カメラは目標へなめらかに寄る
     if (!controls.enabled) {
@@ -348,6 +429,9 @@ async function main() {
         `投入 ${fed}  獲得 ${wins}  ハズレ ${losses}  チェッカー ${checkerHits}`;
     }
   }
+
+  // 検証用: ?debug=1 でコンソールから操作できるようにする
+  if (qs.get('debug') === '1') Object.assign(window, { dh: { get game() { return game; }, physics, cabinet } });
 
   await physics.ready;
   document.getElementById('loading')!.classList.add('hidden');
