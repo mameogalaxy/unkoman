@@ -1,10 +1,10 @@
 // 奥壁の液晶画面。ゲームの状態（src/game/game.ts）を読んで毎フレーム（最大30fps）描き直す。
 import * as THREE from 'three';
 import type { Game } from '../game/game.ts';
-import { DUNGEON_NAMES, ENEMY, ORBS_FOR_WHEEL, MAX_STOCK, SLOT_SYMBOLS, type Loot, type StepCell } from '../game/rules.ts';
+import { DUNGEON_NAMES, ELEM_NAME, ENEMY, ORBS_FOR_WHEEL, MAX_STOCK, SLOT_SYMBOLS, WEAKNESS, type Loot, type StepCell } from '../game/rules.ts';
 import { LANES } from '../physics/layout.ts';
 import {
-  JP, LATIN, bigText, drawDragonMark, drawHero, drawMedalIcon, drawOrb, drawSlotSymbol,
+  JP, LATIN, bigText, drawDragonMark, drawElemIcon, drawHero, drawMedalIcon, drawOrb, drawSlotSymbol,
   goldFrame, goldGrad, roundRect,
 } from './art.ts';
 import { canvas, type Ctx } from './canvasKit.ts';
@@ -26,7 +26,6 @@ function rouletteIndex(n: number, target: number, t: number, dur: number, laps =
 export class LcdScreen {
   readonly texture: THREE.CanvasTexture;
   private out: { cv: HTMLCanvasElement; ctx: Ctx };
-  private lit = -1;
   private hitUntil = 0;
   private hitLane = -1;
   private lastDraw = 0;
@@ -44,10 +43,6 @@ export class LcdScreen {
   /** フォント読み込み後に呼ぶ（今は毎フレーム描き直すので何もしない） */
   refreshBase() {}
 
-  setChecker(lane: number) {
-    this.lit = lane;
-  }
-
   flashHit(lane: number, now: number) {
     this.hitLane = lane;
     this.hitUntil = now + 1000;
@@ -63,7 +58,7 @@ export class LcdScreen {
     this.drawWorld(ctx, g, t);
     this.drawOverlay(ctx, g, t);
     this.drawHud(ctx, g, t);
-    this.drawLanes(ctx, now);
+    this.drawLanes(ctx, now, g);
     this.texture.needsUpdate = true;
     return true;
   }
@@ -74,8 +69,8 @@ export class LcdScreen {
   // ---- 背景の世界（通路 or 戦闘） --------------------------------------------
   private drawWorld(ctx: Ctx, g: Game, t: number) {
     const md = g.mode;
-    const battle = md.m === 'battle' || md.m === 'victory' || md.m === 'retreat' || md.m === 'loot';
-    if (battle) return this.drawBattle(ctx, g, t);
+    if (md.m === 'battle') return this.drawBattle(ctx, g, t);
+    if (md.m === 'victory' || md.m === 'retreat' || md.m === 'loot') return;
     const b = g.s.board;
     // 階層の見出しと進み具合
     const name = `${DUNGEON_NAMES[g.s.dungeon % 4]}  ${g.isBossFloor ? 'ボスの間' : `地下${g.s.floor + 1}階`}`;
@@ -96,52 +91,102 @@ export class LcdScreen {
     ctx.textBaseline = 'alphabetic';
   }
 
-  private drawBattle(ctx: Ctx, g: Game, _t: number) {
+  private drawBattle(ctx: Ctx, g: Game, t: number) {
     const md = g.mode;
-    const kind = md.m === 'battle' || md.m === 'victory' || md.m === 'loot' ? md.kind : (g.s.battle?.kind ?? 0);
-    const boss = kind === 3;
-    const ex = W / 2 - 40, ey = 520;
-    if (md.m === 'battle') {
-      // 敵の HP
-      const bw = 420;
-      ctx.fillStyle = 'rgba(20,0,10,0.7)';
-      roundRect(ctx, ex - bw / 2 - 10, TOP + 20, bw + 20, 70, 12);
-      ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.font = `400 28px ${JP}`;
-      ctx.textAlign = 'center';
-      ctx.fillText(ENEMY[kind].name, ex, TOP + 50);
+    if (md.m !== 'battle') return;
+    const kind = md.kind;
+    const weak = WEAKNESS[md.element];
+    // 敵パーティの HP（1体ずつ）
+    const n = md.hps.length;
+    const bw = n === 1 ? 420 : n === 2 ? 250 : 190;
+    const gap = 16;
+    const x0 = W / 2 - (bw * n + gap * (n - 1)) / 2;
+    ctx.fillStyle = 'rgba(20,0,10,0.72)';
+    roundRect(ctx, x0 - 14, TOP + 12, bw * n + gap * (n - 1) + 28, 86, 12);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = `400 26px ${JP}`;
+    ctx.textAlign = 'center';
+    ctx.fillText(`${ENEMY[kind].name}${n > 1 ? ` ×${n}` : ''}`, W / 2, TOP + 42);
+    for (let i = 0; i < n; i++) {
+      const x = x0 + i * (bw + gap);
       ctx.fillStyle = '#300';
-      ctx.fillRect(ex - bw / 2, TOP + 62, bw, 18);
-      const hg = ctx.createLinearGradient(0, TOP + 62, 0, TOP + 80);
-      hg.addColorStop(0, '#ff8a6a');
-      hg.addColorStop(1, '#b01010');
+      ctx.fillRect(x, TOP + 58, bw, 22);
+      const hg = ctx.createLinearGradient(0, TOP + 58, 0, TOP + 80);
+      hg.addColorStop(0, md.hps[i] > 0 ? '#ff8a6a' : '#555');
+      hg.addColorStop(1, md.hps[i] > 0 ? '#b01010' : '#333');
       ctx.fillStyle = hg;
-      ctx.fillRect(ex - bw / 2, TOP + 62, (bw * md.hp) / md.max, 18);
-      ctx.textAlign = 'left';
-      // ダメージの数字
-      if (md.hitT < 0.8) {
-        const k = md.hitT / 0.8;
-        ctx.globalAlpha = 1 - k;
-        bigText(ctx, `${md.lastDmg}`, ex + 60, ey - (boss ? 330 : 260) - k * 60, md.crit ? 96 : 64, LATIN, 900,
-          md.crit ? '#ffef6a' : '#ffffff');
-        if (md.crit) bigText(ctx, '会心の一撃！', ex, ey - 120, 60, JP, 400, '#ffd23a');
-        ctx.globalAlpha = 1;
-      }
-      // 被弾
-      if (md.heroHitT < 0.6) {
-        ctx.fillStyle = `rgba(255,0,0,${0.35 * (1 - md.heroHitT / 0.6)})`;
-        ctx.fillRect(0, TOP, W, BOTTOM - TOP);
-        bigText(ctx, `-${ENEMY[kind].atk}`, 780, 470 - md.heroHitT * 40, 60, LATIN, 900, '#ff6a5a');
-      }
-      ctx.fillStyle = 'rgba(0,0,0,0.55)';
-      roundRect(ctx, 250, BOTTOM - 54, 524, 44, 20);
-      ctx.fill();
-      ctx.fillStyle = '#ffe9a8';
-      ctx.font = `400 26px ${JP}`;
-      ctx.textAlign = 'center';
-      ctx.fillText('メダル1枚で攻撃！ チェッカーで会心！', W / 2, BOTTOM - 22);
-      ctx.textAlign = 'left';
+      ctx.fillRect(x, TOP + 58, (bw * md.hps[i]) / md.max, 22);
+      ctx.strokeStyle = i === md.target && md.hitT < 0.4 ? '#fff' : '#f1c14e';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, TOP + 58, bw, 22);
+    }
+    // 弱点と吸収
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    roundRect(ctx, 24, TOP + 112, 250, 112, 14);
+    ctx.fill();
+    ctx.textAlign = 'left';
+    ctx.font = `400 26px ${JP}`;
+    ctx.fillStyle = '#ffb0a0';
+    ctx.fillText('弱点', 40, TOP + 152);
+    drawElemIcon(ctx, weak, 130, TOP + 143, 20);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(ELEM_NAME[weak], 158, TOP + 152);
+    ctx.fillStyle = '#9ad8ff';
+    ctx.fillText('吸収', 40, TOP + 202);
+    drawElemIcon(ctx, md.element, 130, TOP + 193, 20);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(ELEM_NAME[md.element], 158, TOP + 202);
+    // 必殺技ゲージ
+    const gx = W - 300, gy = TOP + 118;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    roundRect(ctx, gx - 16, gy - 6, 290, 60, 14);
+    ctx.fill();
+    ctx.fillStyle = '#ffe9a8';
+    ctx.font = `400 22px ${JP}`;
+    ctx.fillText('必殺技', gx, gy + 20);
+    ctx.fillStyle = '#221';
+    roundRect(ctx, gx, gy + 28, 250, 16, 8);
+    ctx.fill();
+    const full = md.gauge >= 100;
+    ctx.fillStyle = full ? (Math.floor(t * 8) % 2 ? '#fff6a0' : '#ff9a20') : goldGrad(ctx, gy + 28, gy + 44);
+    roundRect(ctx, gx, gy + 28, Math.max(10, 250 * md.gauge / 100), 16, 8);
+    ctx.fill();
+    if (full) bigText(ctx, '必殺技OK！', gx + 190, gy + 12, 28, JP, 400, '#fff');
+    // 攻撃の結果
+    if (md.hitT < 0.9) {
+      const k = md.hitT / 0.9;
+      ctx.globalAlpha = 1 - k * k;
+      const y = 300 - k * 50;
+      if (md.lastType === 'miss') bigText(ctx, 'MISS', W / 2, y, 80, LATIN, 900, '#c8d0e0');
+      else if (md.lastType === 'absorb') bigText(ctx, `吸収 +${md.lastDmg}`, W / 2, y, 70, JP, 400, '#8ad8ff');
+      else if (md.lastType === 'weak') {
+        bigText(ctx, `${md.lastDmg}`, W / 2, y, 110, LATIN, 900, '#ffef6a');
+        bigText(ctx, '弱点！', W / 2, y + 90, 60, JP, 400, '#ff7a4a');
+      } else if (md.lastType === 'special') {
+        bigText(ctx, '必殺・竜牙斬！', W / 2, y, 80, JP, 400, '#ffd23a');
+        bigText(ctx, `全体 ${md.lastDmg}`, W / 2, y + 90, 60, LATIN, 900, '#fff');
+      } else bigText(ctx, `${md.lastDmg}`, W / 2, y, 72, LATIN, 900, '#ffffff');
+      ctx.globalAlpha = 1;
+    }
+    // 被弾
+    if (md.heroHitT < 0.6) {
+      ctx.fillStyle = `rgba(255,0,0,${0.35 * (1 - md.heroHitT / 0.6)})`;
+      ctx.fillRect(0, TOP, W, BOTTOM - TOP);
+      bigText(ctx, `-${ENEMY[kind].atk}`, 250, 470 - md.heroHitT * 40, 60, LATIN, 900, '#ff6a5a');
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    roundRect(ctx, 232, BOTTOM - 54, 560, 44, 20);
+    ctx.fill();
+    ctx.fillStyle = '#ffe9a8';
+    ctx.font = `400 26px ${JP}`;
+    ctx.textAlign = 'center';
+    ctx.fillText(`${ELEM_NAME[weak]}の穴を狙え！ ${ELEM_NAME[md.element]}は吸収される`, W / 2, BOTTOM - 22);
+    ctx.textAlign = 'left';
+    if (md.shuffleT < 0.5) {
+      ctx.globalAlpha = 1 - md.shuffleT / 0.5;
+      bigText(ctx, 'シャッフル！', W / 2, BOTTOM - 90, 44, JP, 400, '#fff');
+      ctx.globalAlpha = 1;
     }
   }
 
@@ -193,7 +238,7 @@ export class LcdScreen {
       }
       case 'victory':
         bigText(ctx, 'VICTORY!', W / 2, 330, 120);
-        bigText(ctx, `EXP +${ENEMY[md.kind].exp}`, W / 2, 450, 48, LATIN, 700, '#fff');
+        bigText(ctx, `EXP +${ENEMY[md.kind].exp * md.party}`, W / 2, 450, 48, LATIN, 700, '#fff');
         break;
       case 'retreat':
         ctx.fillStyle = 'rgba(40,0,0,0.6)';
@@ -217,7 +262,7 @@ export class LcdScreen {
         ctx.fillStyle = glow;
         ctx.fillRect(W / 2 - 240, 140, 480, 480);
         drawOrb(ctx, W / 2, 380, 90 * k, ((g.s.orbs - 1) * 45) % 360);
-        bigText(ctx, `宝玉 ${g.s.orbs} / ${ORBS_FOR_WHEEL}`, W / 2, 560, 60, JP, 400);
+        bigText(ctx, `宝玉 +${md.gained}  (${g.s.orbs} / ${ORBS_FOR_WHEEL})`, W / 2, 560, 56, JP, 400);
         break;
       }
       case 'wheelIntro': {
@@ -298,7 +343,7 @@ export class LcdScreen {
   private drawSlot(ctx: Ctx, md: Extract<Game['mode'], { m: 'slot' }>, t: number) {
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
     ctx.fillRect(0, TOP, W, BOTTOM - TOP);
-    bigText(ctx, md.jackpot ? 'JACKPOT SLOT' : 'TREASURE SLOT', W / 2, TOP + 70, 64);
+    bigText(ctx, md.jackpot ? 'JACKPOT SLOT' : 'TREASURE SLOT', W / 2, TOP + 66, 64);
     const stops = [1.4, 2.0, 2.9];
     const rw = 210, rh = 250, gap = 24;
     const x0 = W / 2 - (rw * 3 + gap * 2) / 2;
@@ -331,8 +376,12 @@ export class LcdScreen {
     const reach = md.t >= stops[1] && md.t < stops[2] && md.reels[0] === md.reels[1];
     if (reach && Math.floor(t * 8) % 2 === 0) bigText(ctx, 'リーチ！', W / 2, 590, 64, JP, 400, '#ff5a3a');
     if (md.t >= stops[2]) {
-      const [a, b, c] = md.reels;
-      if (a === b && b === c) bigText(ctx, a === 'dragon' ? '竜が揃った！！' : '揃った！', W / 2, 590, 64, JP, 400);
+      const o = md.outcome;
+      const text = o.k === 'dragon' ? '竜が揃った！！' : o.k === 'orb' ? `宝玉 ×${o.n}` : `${o.n}枚！`;
+      bigText(ctx, text, W / 2, 590, 64, JP, 400);
+    }
+    if (md.spins > 1) {
+      bigText(ctx, `${md.spin + 1} / ${md.spins}回目`, W / 2, TOP + 132, 36, JP, 400, '#fff');
     }
   }
 
@@ -436,17 +485,44 @@ export class LcdScreen {
     ctx.stroke();
   }
 
-  // ---- 下端: レーンのマーク（チェッカー） --------------------------------------
-  private drawLanes(ctx: Ctx, now: number) {
+  // ---- 下端: レーンのマーク（チェッカー / 戦闘中は属性） ------------------------
+  private drawLanes(ctx: Ctx, now: number, g: Game) {
     const hitting = now < this.hitUntil;
     const lw = W / LANES.count;
+    const b = g.battle;
     ctx.fillStyle = 'rgba(30,10,0,0.85)';
     ctx.fillRect(0, BOTTOM, W, H - BOTTOM);
     for (let i = 0; i < LANES.count; i++) {
       const x = lw * (i + 0.5), y = H - 43;
-      const on = i === this.lit || (hitting && i === this.hitLane);
       ctx.beginPath();
-      ctx.arc(x, y, 32, 0, Math.PI * 2);
+      ctx.arc(x, y, 34, 0, Math.PI * 2);
+      if (b) {
+        const icon = b.lanes[i];
+        const weak = icon !== 'miss' && icon === WEAKNESS[b.element];
+        const absorb = icon === b.element;
+        const gg = ctx.createRadialGradient(x, y, 0, x, y, 36);
+        gg.addColorStop(0, weak ? '#ffe0a0' : absorb ? '#20304a' : icon === 'miss' ? '#2a2030' : '#4a4a60');
+        gg.addColorStop(1, weak ? '#c02008' : absorb ? '#0a1020' : '#15101c');
+        ctx.fillStyle = gg;
+        ctx.fill();
+        ctx.lineWidth = weak ? 6 : 3;
+        ctx.strokeStyle = weak ? (Math.floor(now / 150) % 2 ? '#fff' : '#ffd23a') : '#b89a50';
+        ctx.stroke();
+        if (icon === 'miss') {
+          ctx.strokeStyle = 'rgba(220,210,255,0.6)';
+          ctx.lineWidth = 5;
+          ctx.beginPath();
+          ctx.moveTo(x - 13, y - 13); ctx.lineTo(x + 13, y + 13);
+          ctx.moveTo(x + 13, y - 13); ctx.lineTo(x - 13, y + 13);
+          ctx.stroke();
+        } else {
+          ctx.globalAlpha = absorb ? 0.45 : 1;
+          drawElemIcon(ctx, icon, x, y, 22);
+          ctx.globalAlpha = 1;
+        }
+        continue;
+      }
+      const on = i === g.checkerLane || (hitting && i === this.hitLane);
       if (on) {
         const gg = ctx.createRadialGradient(x, y, 0, x, y, 34);
         gg.addColorStop(0, '#fff');

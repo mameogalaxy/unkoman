@@ -151,14 +151,6 @@ let wins = 0;
 let losses = 0;
 let checkerHits = 0;
 
-// ---- チェッカー: 画面下のランプが左右に往復する ----------------------------
-const CHECKER_STEP = 0.16; // 1レーン進む秒数
-function checkerLaneAt(t: number) {
-  const n = LANES.count;
-  const k = Math.floor(t / CHECKER_STEP) % (n * 2 - 2);
-  return k < n ? k : n * 2 - 2 - k;
-}
-
 async function main() {
   await loadFonts();
   screen.refreshBase();
@@ -206,15 +198,8 @@ async function main() {
       }
     }
     for (const im of s.impacts) sfx.impact(im.dv, im.x);
-    const now = performance.now();
-    for (const lane of s.laneHits) {
-      if (lane === checkerLaneAt(now / 1000)) {
-        checkerHits++;
-        screen.flashHit(lane, now);
-        sfx.checker();
-        game.checker();
-      }
-    }
+    // 穴を通過したメダル: 戦闘中は攻撃、それ以外は光る穴ならチェッカー当たり（判定は Game 側）
+    for (const lane of s.laneHits) game.lane(lane);
   };
   screen.onTick = () => sfx.game('tick');
   cabinet.wheel.onTick = () => sfx.game('tick');
@@ -257,6 +242,7 @@ async function main() {
     if (e.key === 'ArrowLeft') aimX = Math.max(-14, aimX - 1);
     if (e.key === 'ArrowRight') aimX = Math.min(14, aimX + 1);
     if (e.key === ' ') feed();
+    if (e.key === 's' || e.key === 'S') game.special();
   });
   const toast = document.getElementById('toast')!;
   let toastTimer = 0;
@@ -278,6 +264,7 @@ async function main() {
   }
 
   const creditsEl = document.getElementById('credits')!;
+  const specialBtn = document.querySelector<HTMLButtonElement>('button[data-act=special]')!;
   let recoil = 0;
   let auto = false;
   let autoAcc = 0;
@@ -290,6 +277,7 @@ async function main() {
     sfx.unlock();
     switch (btn.dataset.act) {
       case 'drop': feed(); break;
+      case 'special': game.special(); break;
       case 'auto':
         auto = !auto;
         btn.textContent = auto ? '連射 ON' : '連射 OFF';
@@ -383,6 +371,11 @@ async function main() {
     game.update(dtFrame);
     for (const e of game.events) {
       if (e.t === 'sfx') sfx.game(e.name);
+      else if (e.t === 'checker') {
+        checkerHits++;
+        screen.flashHit(e.lane, now);
+        sfx.checker();
+      }
       else if (e.t === 'wheelSpin') cabinet.wheel.spin(e.target, () => game.wheelStopped());
     }
     game.events.length = 0;
@@ -402,11 +395,25 @@ async function main() {
     }
 
     // 演出
-    const lit = checkerLaneAt(t);
-    screen.setChecker(lit);
     dungeon.update(game, t, dtFrame);
     if (screen.update(now, game)) lcd.render(renderer);
-    cabinet.checkerLamps.forEach((m, i) => m.color.setRGB(i === lit ? 4 : 0.35, i === lit ? 0.9 : 0.08, i === lit ? 0.3 : 0.05));
+    // 穴の上のランプ: 通常は光る穴だけ赤、戦闘中は属性の色（弱点は点滅）
+    const bt = game.battle;
+    cabinet.checkerLamps.forEach((m, i) => {
+      if (bt) {
+        const ic = bt.lanes[i];
+        const weak = ic !== 'miss' && ic !== bt.element && ic === ({ fire: 'ice', ice: 'thunder', thunder: 'fire' } as const)[bt.element];
+        const c = ic === 'fire' ? [3, 0.6, 0.1] : ic === 'ice' ? [0.4, 1.4, 3] : ic === 'thunder' ? [3, 2.4, 0.3] : [0.08, 0.06, 0.1];
+        const k = weak ? (Math.floor(t * 8) % 2 ? 1.4 : 0.5) : ic === bt.element ? 0.25 : 0.6;
+        m.color.setRGB(c[0] * k, c[1] * k, c[2] * k);
+      } else {
+        const lit = i === game.checkerLane;
+        m.color.setRGB(lit ? 4 : 0.35, lit ? 0.9 : 0.08, lit ? 0.3 : 0.05);
+      }
+    });
+    specialBtn.hidden = !bt;
+    specialBtn.disabled = !game.canSpecial;
+    specialBtn.classList.toggle('ready', game.canSpecial);
     // 発射台は狙いの穴を向く。撃つと砲身が少し下がる
     cabinet.sight.position.x += (aimX - cabinet.sight.position.x) * Math.min(1, dtFrame * 20);
     const dz = LANES.frontZ - (SHOOTER.z + 1.2);

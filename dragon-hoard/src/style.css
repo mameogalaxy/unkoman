@@ -94,3 +94,12 @@ html, body {
   pointer-events: none;
 }
 [hidden] { display: none !important; }
+#bar button:disabled { opacity: 0.45; }
+#bar button.ready {
+  background: linear-gradient(#ffcf4a, #d0461a);
+  color: #2a0a00;
+  border-color: #fff;
+  animation: pulse 0.5s ease-in-out infinite alternate;
+}
+@keyframes pulse { from { transform: scale(1); } to { transform: scale(1.08); } }
+@media (prefers-reduced-motion: reduce) { #bar button.ready { animation: none; } }

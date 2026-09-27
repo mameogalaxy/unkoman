@@ -559,3 +559,66 @@ export function dungeonStrip(theme: number, w: number, h: number) {
   ctx.fillRect(0, h * 0.72, w, h * 0.28);
   return cv;
 }
+
+/** 属性のアイコン（炎・氷・雷） */
+export function drawElemIcon(ctx: Ctx, elem: 'fire' | 'ice' | 'thunder', x: number, y: number, r: number) {
+  ctx.save();
+  ctx.translate(x, y);
+  if (elem === 'fire') {
+    const g = ctx.createLinearGradient(0, -r, 0, r);
+    g.addColorStop(0, '#fff2a0');
+    g.addColorStop(0.5, '#ff8a20');
+    g.addColorStop(1, '#c01a08');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(0, -r);
+    ctx.bezierCurveTo(r * 0.5, -r * 0.4, r * 0.9, 0, r * 0.7, r * 0.5);
+    ctx.quadraticCurveTo(r * 0.4, r, 0, r);
+    ctx.quadraticCurveTo(-r * 0.4, r, -r * 0.7, r * 0.5);
+    ctx.bezierCurveTo(-r * 0.8, 0, -r * 0.2, -r * 0.2, 0, -r);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,200,0.8)';
+    ctx.beginPath();
+    ctx.ellipse(0, r * 0.45, r * 0.25, r * 0.38, 0, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (elem === 'ice') {
+    const g = ctx.createLinearGradient(-r, -r, r, r);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.5, '#8ad8ff');
+    g.addColorStop(1, '#1a5ac8');
+    ctx.fillStyle = g;
+    ctx.strokeStyle = '#e8fbff';
+    ctx.lineWidth = r * 0.08;
+    ctx.beginPath();
+    ctx.moveTo(0, -r);
+    ctx.lineTo(r * 0.55, -r * 0.2);
+    ctx.lineTo(r * 0.35, r);
+    ctx.lineTo(-r * 0.35, r);
+    ctx.lineTo(-r * 0.55, -r * 0.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, -r);
+    ctx.lineTo(0, r);
+    ctx.stroke();
+  } else {
+    const g = ctx.createLinearGradient(0, -r, 0, r);
+    g.addColorStop(0, '#fffbd0');
+    g.addColorStop(1, '#f0b000');
+    ctx.fillStyle = g;
+    ctx.strokeStyle = '#7a4a00';
+    ctx.lineWidth = r * 0.08;
+    ctx.beginPath();
+    ctx.moveTo(r * 0.25, -r);
+    ctx.lineTo(-r * 0.5, r * 0.1);
+    ctx.lineTo(-r * 0.05, r * 0.1);
+    ctx.lineTo(-r * 0.3, r);
+    ctx.lineTo(r * 0.55, -r * 0.2);
+    ctx.lineTo(r * 0.05, -r * 0.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+}

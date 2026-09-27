@@ -87,8 +87,8 @@ function flameTexture() {
 
 interface TileObj {
   root: THREE.Group;
-  enemy?: Actor;
-  enemyKind?: number;
+  /** 敵パーティ（1〜3体） */
+  enemies?: { actor: Actor; deadT: number }[];
   chest?: ChestActor;
   stairs?: { root: THREE.Group; beam: THREE.Mesh };
 }
@@ -237,17 +237,24 @@ export class DungeonView {
         this.tileGroup.add(o.root);
         this.tiles.set(i, o);
       }
-      // 敵（倒した後は消す）
+      // 敵パーティ（倒した後は消す）
       const wantEnemy = tile.kind === 'enemy' && !tile.done;
-      if (wantEnemy && !o.enemy) {
-        o.enemy = makeEnemy(tile.enemy!);
-        o.enemyKind = tile.enemy!;
-        o.enemy.root.position.y = 0.14;
-        o.root.add(o.enemy.root);
-      } else if (!wantEnemy && o.enemy && g.mode.m !== 'victory') {
-        o.root.remove(o.enemy.root);
-        o.enemy.root.traverse((c) => (c as THREE.Mesh).geometry?.dispose());
-        o.enemy = undefined;
+      if (wantEnemy && !o.enemies) {
+        const n = tile.party ?? 1;
+        const xs = n === 1 ? [0] : n === 2 ? [-0.55, 0.55] : [-0.8, 0, 0.8];
+        o.enemies = xs.map((x, k) => {
+          const actor = makeEnemy(tile.enemy!);
+          actor.root.position.set(x, 0.14, n === 3 && k === 1 ? -0.45 : 0);
+          if (n > 1) actor.root.scale.setScalar(0.85);
+          o!.root.add(actor.root);
+          return { actor, deadT: -1 };
+        });
+      } else if (!wantEnemy && o.enemies && g.mode.m !== 'victory') {
+        for (const e of o.enemies) {
+          o.root.remove(e.actor.root);
+          e.actor.root.traverse((c) => (c as THREE.Mesh).geometry?.dispose());
+        }
+        o.enemies = undefined;
       }
     }
   }
@@ -275,18 +282,26 @@ export class DungeonView {
     const walking = md.m === 'move' || Math.abs(g.heroX - g.s.pos) > 0.02;
     this.hero.update(t, {
       walk: walking ? 1 : 0,
-      attack: md.m === 'battle' && md.hitT < 0.45 ? md.hitT / 0.45 : 0,
+      attack: md.m === 'battle' && md.hitT < 0.45 && md.lastType !== 'absorb' ? md.hitT / 0.45 : 0,
       hurt: md.m === 'battle' && md.heroHitT < 0.5 ? 1 - md.heroHitT / 0.5 : 0,
     });
 
     // マスの上のもの
     for (const [i, o] of this.tiles) {
-      if (o.enemy) {
+      if (o.enemies) {
         const here = i === g.s.pos;
-        o.enemy.update(t + i, {
-          hurt: here && md.m === 'battle' && md.hitT < 0.3 ? 1 - md.hitT / 0.3 : 0,
-          attack: here && md.m === 'battle' && md.heroHitT < 0.5 ? md.heroHitT / 0.5 : 0,
-          dead: here && md.m === 'victory' ? clamp01(md.t / 0.9) : 0,
+        o.enemies.forEach((e, k) => {
+          const b = here && md.m === 'battle' ? md : null;
+          const hit = !!b && b.hitT < 0.3 && b.lastType !== 'miss' && b.lastType !== 'absorb' && (b.lastType === 'special' || b.target === k);
+          // HP が 0 になった敵はその場で沈んで消える
+          const dead = (b && b.hps[k] === 0) || (here && md.m === 'victory');
+          if (dead && e.deadT < 0) e.deadT = 0;
+          if (e.deadT >= 0) e.deadT += dt;
+          e.actor.update(t + i + k * 1.3, {
+            hurt: hit ? 1 - b!.hitT / 0.3 : 0,
+            attack: b && b.heroHitT < 0.5 ? b.heroHitT / 0.5 : 0,
+            dead: e.deadT >= 0 ? clamp01((e.deadT - 0.25) / 0.7) : 0,
+          });
         });
       }
       if (o.chest && i === g.s.pos && md.m === 'chest') o.chest.setOpen(clamp01((md.t - 0.6) / 0.5));
@@ -310,8 +325,8 @@ export class DungeonView {
     // カメラ
     let cp: THREE.Vector3, cl: THREE.Vector3;
     if (inBattle && !boss) {
-      cp = new THREE.Vector3(1.9, 1.7, tileZ + 5.6);
-      cl = new THREE.Vector3(-0.2, 0.8, tileZ + 0.8);
+      cp = new THREE.Vector3(2.0, 2.0, tileZ + 6.6);
+      cl = new THREE.Vector3(0.1, 0.7, tileZ + 0.6);
     } else if (boss) {
       cp = new THREE.Vector3(2.2, 1.5, tileZ + 9.4);
       cl = new THREE.Vector3(0, 2.1, tileZ);
@@ -327,7 +342,7 @@ export class DungeonView {
     this.camLook.lerp(cl, k);
     this.camera.position.copy(this.camPos);
     // 被弾・会心で画面が揺れる
-    if (md.m === 'battle' && (md.heroHitT < 0.3 || (md.crit && md.hitT < 0.3))) {
+    if (md.m === 'battle' && (md.heroHitT < 0.3 || ((md.lastType === 'weak' || md.lastType === 'special') && md.hitT < 0.3))) {
       this.camera.position.x += (Math.random() - 0.5) * 0.12;
       this.camera.position.y += (Math.random() - 0.5) * 0.08;
     }

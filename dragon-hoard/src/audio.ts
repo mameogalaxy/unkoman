@@ -150,6 +150,12 @@ export class Sfx {
       case 'chest': this.noise(0.5, 400, 1600, 0.25); break;
       case 'hit': this.noise(0.12, 3000, 800, 0.4); break;
       case 'crit': this.noise(0.25, 5000, 400, 0.6); this.tone([[C6, 0, 0.1], [C6 * 1.5, 0.05, 0.25]], 'sawtooth', 0.08); break;
+      case 'weak': this.noise(0.3, 6000, 500, 0.6); this.tone([[C6, 0, 0.08], [C6 * 1.25, 0.06, 0.08], [C6 * 1.5, 0.12, 0.3]], 'square', 0.1); break;
+      case 'absorb': this.tone([[600, 0, 0.25], [400, 0.08, 0.3]], 'sine', 0.18); break;
+      case 'miss': this.noise(0.1, 800, 400, 0.15); break;
+      case 'special': this.noise(0.8, 200, 6000, 0.5); this.tone([C, E, G, C6, E * 2, G * 2].map((f, i) => [f, i * 0.05, 0.4] as [number, number, number]), 'sawtooth', 0.08); break;
+      case 'shuffle': this.tone([[900, 0, 0.04], [1100, 0.05, 0.04], [1300, 0.1, 0.04]], 'square', 0.06); break;
+      case 'defeat': this.tone([[G, 0, 0.1], [C6, 0.08, 0.2]], 'square', 0.1); break;
       case 'enemyHit': this.tone([[110, 0, 0.3], [82, 0.05, 0.3]], 'sawtooth', 0.15); break;
       case 'fanfare': this.tone([[C, 0, 0.12], [C, 0.12, 0.12], [C, 0.24, 0.12], [E, 0.4, 0.2], [G, 0.62, 0.5]], 'square', 0.1); break;
       case 'win': this.tone([[G, 0, 0.1], [C6, 0.1, 0.3]], 'triangle', 0.18); break;

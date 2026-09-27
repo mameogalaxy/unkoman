@@ -1,13 +1,13 @@
 // ゲームの進行（描画・物理から独立した状態機械）。
-// 入力: fed()（メダル投入）, checker()（チェッカー当たり）, won()（手前から獲得）, update(dt)
+// 入力: fed()（メダル発射）, lane(i)（メダルが i 番の穴を通過）, special()（必殺技ボタン）, won()（手前から獲得）, update(dt)
 // 出力: events（払い出し・大ルーレット・効果音）と、画面が読む状態
 import { mulberry32 } from '../physics/seed.ts';
 import {
-  CHEST_TABLE, CRIT_DAMAGE, DUNGEON_COUNT, ENEMY, ENEMY_ATTACK_EVERY, ENEMY_TILE_RATE, FLOORS_PER_DUNGEON,
-  GOLD_CELLS, GOLD_WEIGHTS, LOOT_CELLS, LOOT_WEIGHTS, MAX_STOCK, ORBS_FOR_WHEEL, SILVER_CELLS, SILVER_WEIGHTS,
-  SLOT_CONSOLATION, SLOT_DRAGON_CHANCE, SLOT_MATCH_CHANCE, SLOT_MATCH_TABLE, SLOT_PAY, SLOT_SYMBOLS, TILES_PER_FLOOR,
-  enemyTable, pick,
-  type ChestItem, type EnemyKind, type Loot, type SlotSymbol, type StepCell,
+  CHECKER_STAY, CHEST_SLOT_TABLE, CHEST_TABLE, DAMAGE, DUNGEON_COUNT, ELEMS, ENEMY, ENEMY_ATTACK_EVERY, ENEMY_TILE_RATE,
+  FLOORS_PER_DUNGEON, GAUGE, GOLD_CELLS, GOLD_WEIGHTS, JACKPOT_TABLE, LANE_SHUFFLE_EVERY, LOOT_CELLS, LOOT_WEIGHTS, MAX_STOCK,
+  ORBS_FOR_WHEEL, PARTY_SIZE, SILVER_CELLS, SILVER_WEIGHTS, SLOT_SYMBOLS, TILES_PER_FLOOR, WEAKNESS,
+  battleLanes, enemyTable, jackpotSpins, pick,
+  type ChestItem, type Elem, type EnemyKind, type HitType, type LaneIcon, type Loot, type SlotOutcome, type SlotSymbol, type StepCell,
 } from './rules.ts';
 import { WHEEL_CELLS } from './wheelCells.ts';
 
@@ -15,7 +15,43 @@ export interface Tile {
   kind: 'start' | 'chest' | 'enemy' | 'stairs';
   chest?: ChestItem;
   enemy?: EnemyKind;
+  party?: number;
+  element?: Elem;
   done?: boolean;
+}
+
+export interface BattleMode {
+  m: 'battle';
+  kind: EnemyKind;
+  element: Elem;
+  /** 敵パーティ各体の HP（0 で撃破） */
+  hps: number[];
+  max: number;
+  lanes: LaneIcon[];
+  shuffleT: number;
+  t: number;
+  atkT: number;
+  hitT: number;
+  lastDmg: number;
+  lastType: HitType;
+  /** 最後に攻撃を受けた敵 */
+  target: number;
+  heroHitT: number;
+  gauge: number;
+}
+
+export interface SlotMode {
+  m: 'slot';
+  jackpot: boolean;
+  spin: number;
+  spins: number;
+  reels: SlotSymbol[];
+  outcome: SlotOutcome;
+  t: number;
+  medals: number;
+  orbs: number;
+  dragon: boolean;
+  next: Mode;
 }
 
 export type Mode =
@@ -24,12 +60,12 @@ export type Mode =
   | { m: 'move'; left: number; t: number }
   | { m: 'floor'; t: number; boss: boolean }
   | { m: 'chest'; item: ChestItem; t: number }
-  | { m: 'battle'; kind: EnemyKind; hp: number; max: number; t: number; atkT: number; hitT: number; lastDmg: number; crit: boolean; heroHitT: number }
-  | { m: 'victory'; kind: EnemyKind; t: number }
+  | BattleMode
+  | { m: 'victory'; kind: EnemyKind; party: number; t: number }
   | { m: 'retreat'; t: number }
-  | { m: 'loot'; kind: EnemyKind; cells: Loot[]; target: number; t: number; dur: number }
-  | { m: 'slot'; jackpot: boolean; reels: SlotSymbol[]; t: number }
-  | { m: 'orb'; t: number; next: Mode }
+  | { m: 'loot'; kind: EnemyKind; party: number; cells: Loot[]; target: number; t: number; dur: number }
+  | SlotMode
+  | { m: 'orb'; t: number; gained: number; next: Mode }
   | { m: 'wheelIntro'; t: number; reason: 'orb' | 'slot' | 'chain'; spins: number }
   | { m: 'wheel'; spins: number; target: number; waiting: boolean; t: number }
   | { m: 'get'; amount: number; t: number; label: string };
@@ -38,9 +74,12 @@ export type GameEvent =
   | { t: 'payout'; n: number }
   | { t: 'wheelSpin'; target: number }
   | { t: 'wheelEnd' }
+  | { t: 'checker'; lane: number }
   | { t: 'sfx'; name: SfxName };
 
-export type SfxName = 'tick' | 'stop' | 'gold' | 'step' | 'chest' | 'hit' | 'crit' | 'enemyHit' | 'win' | 'fanfare' | 'reel' | 'reach' | 'orb' | 'stock' | 'bigwin';
+export type SfxName =
+  | 'tick' | 'stop' | 'gold' | 'step' | 'chest' | 'hit' | 'crit' | 'weak' | 'absorb' | 'miss' | 'special' | 'enemyHit'
+  | 'win' | 'fanfare' | 'reel' | 'reach' | 'orb' | 'stock' | 'bigwin' | 'shuffle' | 'defeat';
 
 export interface SaveData {
   v: 1;
@@ -55,7 +94,7 @@ export interface SaveData {
   orbs: number;
   stock: number;
   loop: number;
-  battle?: { kind: EnemyKind; hp: number };
+  battle?: { kind: EnemyKind; element: Elem; hps: number[]; gauge: number };
   pendingPayout: number;
   totals: { fed: number; won: number; paid: number; checker: number; wheel: number };
   seed: number;
@@ -68,9 +107,14 @@ export class Game {
   mode: Mode = { m: 'map' };
   /** 次に戻るモード（get 表示の後など） */
   private after: Mode | null = null;
+  /** 大ルーレットが終わった後に戻る先 */
+  private afterWheel: Mode | null = null;
   events: GameEvent[] = [];
   /** 画面用: 主人公の表示位置（移動のなめらかさ用） */
   heroX = 0;
+  /** チェッカー: 光っている穴と、そこにとどまる残り時間 */
+  checkerLane = 3;
+  private checkerT = 3;
   private rand: () => number;
   time = 0;
 
@@ -78,10 +122,13 @@ export class Game {
     this.s = save ?? Game.fresh();
     this.rand = mulberry32(this.s.seed ^ (Date.now() & 0xffff));
     this.heroX = this.s.pos;
-    if (this.s.battle) {
-      const b = this.s.battle;
-      this.mode = this.battleMode(b.kind, b.hp);
+    const b = this.s.battle;
+    if (b && Array.isArray(b.hps) && b.element) {
+      this.mode = this.battleMode(b.kind, b.element, b.hps, b.gauge ?? 0);
+    } else {
+      this.s.battle = undefined; // 古い形式の保存データは戦闘をやり直し
     }
+    this.jumpChecker();
   }
 
   static fresh(): SaveData {
@@ -97,8 +144,13 @@ export class Game {
   static makeBoard(dungeon: number, floor: number, rand: () => number): Tile[] {
     const tiles: Tile[] = [{ kind: 'start', done: true }];
     for (let i = 1; i < TILES_PER_FLOOR - 1; i++) {
-      if (rand() < ENEMY_TILE_RATE) tiles.push({ kind: 'enemy', enemy: pick(enemyTable(dungeon, floor), rand) });
-      else tiles.push({ kind: 'chest', chest: pick(CHEST_TABLE, rand) });
+      if (rand() < ENEMY_TILE_RATE) {
+        const enemy = pick(enemyTable(dungeon, floor), rand);
+        const [lo, hi] = PARTY_SIZE[enemy];
+        tiles.push({ kind: 'enemy', enemy, party: lo + Math.floor(rand() * (hi - lo + 1)), element: ELEMS[Math.floor(rand() * 3)] });
+      } else {
+        tiles.push({ kind: 'chest', chest: pick(CHEST_TABLE, rand) });
+      }
     }
     tiles.push({ kind: 'stairs' });
     return tiles;
@@ -107,27 +159,31 @@ export class Game {
   get maxHp() { return 90 + this.s.lv * 10; }
   get isBossFloor() { return this.s.floor >= FLOORS_PER_DUNGEON; }
   get busy() { return this.mode.m !== 'map'; }
+  get battle(): BattleMode | null { return this.mode.m === 'battle' ? this.mode : null; }
+  get canSpecial() { const b = this.battle; return !!b && b.gauge >= 100 && b.hps.some((h) => h > 0); }
 
   private sfx(name: SfxName) { this.events.push({ t: 'sfx', name }); }
 
   private payout(n: number, label: string, next: Mode = { m: 'map' }) {
-    this.s.pendingPayout += n;
-    this.s.totals.paid += n;
-    this.events.push({ t: 'payout', n });
+    this.addPayout(n);
     this.mode = { m: 'get', amount: n, t: 0, label };
     this.after = next;
     this.sfx(n >= 100 ? 'bigwin' : 'win');
   }
 
+  private addPayout(n: number) {
+    this.s.pendingPayout += n;
+    this.s.totals.paid += n;
+    this.events.push({ t: 'payout', n });
+  }
+
   // ---- 入力 ----------------------------------------------------------------
   canFeed() { return this.s.credits > 0; }
 
-  /** メダルを1枚投入した（手持ちから引く） */
+  /** メダルを1枚撃った（手持ちから引く） */
   fed() {
     this.s.credits--;
     this.s.totals.fed++;
-    const b = this.mode;
-    if (b.m === 'battle') this.damage(1, false);
   }
 
   /** 手前から落ちて獲得した */
@@ -136,25 +192,88 @@ export class Game {
     this.s.totals.won += n;
   }
 
-  /** チェッカー当たり */
-  checker() {
-    this.s.totals.checker++;
-    if (this.mode.m === 'battle') {
-      this.damage(CRIT_DAMAGE + Math.floor(this.s.lv / 3), true);
+  /** メダルが lane 番の穴を通過した。戦闘中は攻撃、それ以外は光る穴ならチェッカー当たり */
+  lane(lane: number) {
+    const b = this.battle;
+    if (b) {
+      this.attack(b, b.lanes[lane]);
       return;
     }
+    if (lane !== this.checkerLane) return;
+    this.s.totals.checker++;
+    this.events.push({ t: 'checker', lane });
     if (this.s.stock < MAX_STOCK) {
       this.s.stock++;
       this.sfx('stock');
     }
+    // 当たった穴からはすぐ移る（同じ穴に撃ち続けるだけでは当たらない）
+    this.jumpChecker();
+  }
+
+  /** 必殺技（ゲージ満タンで全員に大ダメージ） */
+  special() {
+    const b = this.battle;
+    if (!b || !this.canSpecial) return;
+    b.gauge = 0;
+    const dmg = DAMAGE.special + this.s.lv;
+    for (let i = 0; i < b.hps.length; i++) if (b.hps[i] > 0) b.hps[i] = Math.max(0, b.hps[i] - dmg);
+    b.hitT = 0;
+    b.lastDmg = dmg;
+    b.lastType = 'special';
+    this.sfx('special');
+    this.saveBattle(b);
+  }
+
+  private jumpChecker() {
+    let next = this.checkerLane;
+    while (next === this.checkerLane) next = Math.floor(this.rand() * 8);
+    this.checkerLane = next;
+    this.checkerT = CHECKER_STAY[0] + this.rand() * (CHECKER_STAY[1] - CHECKER_STAY[0]);
+  }
+
+  private attack(b: BattleMode, icon: LaneIcon) {
+    const target = b.hps.findIndex((h) => h > 0);
+    if (target < 0) return;
+    let type: HitType;
+    let dmg: number;
+    if (icon === 'miss') {
+      type = 'miss';
+      dmg = 0;
+    } else if (icon === WEAKNESS[b.element]) {
+      type = 'weak';
+      dmg = DAMAGE.weak + Math.floor(this.s.lv / 4);
+    } else if (icon === b.element) {
+      type = 'absorb';
+      dmg = DAMAGE.absorb;
+    } else {
+      type = 'normal';
+      dmg = DAMAGE.normal + Math.floor(this.s.lv / 6);
+    }
+    b.hps[target] = Math.max(0, Math.min(b.max, b.hps[target] - dmg));
+    if (type === 'normal') b.gauge = Math.min(100, b.gauge + GAUGE.normal);
+    if (type === 'weak') b.gauge = Math.min(100, b.gauge + GAUGE.weak);
+    b.hitT = 0;
+    b.lastDmg = Math.abs(dmg);
+    b.lastType = type;
+    b.target = target;
+    this.sfx(type === 'weak' ? 'weak' : type === 'absorb' ? 'absorb' : type === 'miss' ? 'miss' : 'hit');
+    if (b.hps[target] === 0) this.sfx('defeat');
+    this.saveBattle(b);
+  }
+
+  private saveBattle(b: BattleMode) {
+    this.s.battle = { kind: b.kind, element: b.element, hps: b.hps.slice(), gauge: b.gauge };
   }
 
   // ---- 進行 ----------------------------------------------------------------
   update(dt: number) {
     this.time += dt;
     const md = this.mode;
-    // 主人公の表示位置
     this.heroX += Math.sign(this.s.pos - this.heroX) * Math.min(Math.abs(this.s.pos - this.heroX), dt * 5);
+    if (md.m !== 'battle') {
+      this.checkerT -= dt;
+      if (this.checkerT <= 0) this.jumpChecker();
+    }
     switch (md.m) {
       case 'map':
         if (this.s.stock > 0) {
@@ -188,7 +307,6 @@ export class Game {
           if (tile.kind === 'stairs') {
             this.mode = { m: 'floor', t: 0, boss: this.s.floor + 1 >= FLOORS_PER_DUNGEON };
           } else if (md.left <= 0 || this.s.pos >= this.s.board.length - 1) {
-            // ボスの間は最後のマス（ボス）で止まる
             this.land(tile);
           }
         }
@@ -202,12 +320,19 @@ export class Game {
         md.t += dt;
         if (md.t > 1.6) this.openChest(md.item);
         break;
-      case 'battle':
+      case 'battle': {
         md.t += dt;
         md.hitT += dt;
         md.heroHitT += dt;
         md.atkT += dt;
-        if (md.hp > 0 && md.atkT > ENEMY_ATTACK_EVERY) {
+        md.shuffleT += dt;
+        const alive = md.hps.filter((h) => h > 0).length;
+        if (md.shuffleT > LANE_SHUFFLE_EVERY && alive > 0) {
+          md.shuffleT = 0;
+          md.lanes = battleLanes(md.element, this.rand);
+          this.sfx('shuffle');
+        }
+        if (alive > 0 && md.atkT > ENEMY_ATTACK_EVERY / (1 + 0.35 * (alive - 1))) {
           md.atkT = 0;
           md.heroHitT = 0;
           this.s.hp = Math.max(0, this.s.hp - ENEMY[md.kind].atk);
@@ -215,23 +340,29 @@ export class Game {
           if (this.s.hp <= 0) {
             this.s.battle = undefined;
             this.mode = { m: 'retreat', t: 0 };
+            break;
           }
         }
-        if (md.hp <= 0 && md.hitT > 0.8) {
+        if (alive === 0 && md.hitT > 0.9) {
           this.s.battle = undefined;
-          this.gainExp(ENEMY[md.kind].exp);
-          this.mode = { m: 'victory', kind: md.kind, t: 0 };
+          this.gainExp(ENEMY[md.kind].exp * md.hps.length);
+          this.mode = { m: 'victory', kind: md.kind, party: md.hps.length, t: 0 };
           this.sfx('fanfare');
         }
-        if (this.mode === md) this.s.battle = { kind: md.kind, hp: md.hp };
         break;
+      }
       case 'victory':
         md.t += dt;
         if (md.t > 1.8) {
           const tile = this.s.board[this.s.pos];
           if (tile) tile.done = true;
-          if (md.kind === 3) this.startSlot(true);
-          else this.startLoot(md.kind);
+          if (md.kind === 3) {
+            // ボス撃破: ダンジョンの深さに応じた回数のジャックポットスロット → 次のダンジョン
+            this.clearDungeon();
+            this.startSlot(true, jackpotSpins(this.s.dungeon === 0 ? DUNGEON_COUNT - 1 : this.s.dungeon - 1, this.s.loop), { m: 'floor', t: 0, boss: false });
+          } else {
+            this.startLoot(md.kind, md.party);
+          }
         }
         break;
       case 'retreat':
@@ -246,9 +377,9 @@ export class Game {
         md.t += dt;
         if (md.t >= md.dur + 0.7) {
           const r = md.cells[md.target];
-          if (r === 'orb') this.gainOrb();
-          else if (r === 'slot') this.startSlot(false);
-          else this.payout(r, '戦利品');
+          if (r === 'orb') this.gainOrbs(1, { m: 'map' });
+          else if (r === 'slot') this.startSlot(false, 1, { m: 'map' });
+          else this.payout(r, 'バトルボーナス');
         } else if (md.t >= md.dur && md.t - dt < md.dur) {
           this.sfx('stop');
         }
@@ -259,12 +390,13 @@ export class Game {
         md.t += dt;
         for (const at of [1.4, 2.0, 2.9]) if (prev < at && md.t >= at) this.sfx('reel');
         if (prev < 2.0 && md.t >= 2.0 && md.reels[0] === md.reels[1]) this.sfx('reach');
-        if (md.t > 3.8) this.finishSlot(md);
+        if (prev < 2.9 && md.t >= 2.9) this.applySlot(md);
+        if (md.t > 4.0) this.nextSpin(md);
         break;
       }
       case 'orb':
         md.t += dt;
-        if (md.t > 1.6) {
+        if (md.t > 1.8) {
           if (this.s.orbs >= ORBS_FOR_WHEEL) {
             this.s.orbs = 0;
             this.afterWheel = md.next;
@@ -307,26 +439,21 @@ export class Game {
       this.mode = { m: 'chest', item: tile.chest!, t: 0 };
       this.sfx('chest');
     } else if (tile.kind === 'enemy') {
-      this.mode = this.battleMode(tile.enemy!, ENEMY[tile.enemy!].hp);
+      const kind = tile.enemy!;
+      const n = tile.party ?? 1;
+      const element = tile.element ?? ELEMS[Math.floor(this.rand() * 3)];
+      this.mode = this.battleMode(kind, element, Array(n).fill(ENEMY[kind].hp), 0);
+      this.saveBattle(this.mode as BattleMode);
     } else {
       this.mode = { m: 'map' };
     }
   }
 
-  private battleMode(kind: EnemyKind, hp: number): Mode {
-    this.s.battle = { kind, hp };
-    return { m: 'battle', kind, hp, max: ENEMY[kind].hp, t: 0, atkT: 0, hitT: 9, lastDmg: 0, crit: false, heroHitT: 9 };
-  }
-
-  private damage(n: number, crit: boolean) {
-    const b = this.mode;
-    if (b.m !== 'battle' || b.hp <= 0) return;
-    b.hp = Math.max(0, b.hp - n);
-    b.hitT = 0;
-    b.lastDmg = n;
-    b.crit = crit;
-    this.s.battle = { kind: b.kind, hp: b.hp };
-    this.sfx(crit ? 'crit' : 'hit');
+  private battleMode(kind: EnemyKind, element: Elem, hps: number[], gauge: number): BattleMode {
+    return {
+      m: 'battle', kind, element, hps: hps.slice(), max: ENEMY[kind].hp, lanes: battleLanes(element, this.rand), shuffleT: 0,
+      t: 0, atkT: 0, hitT: 9, lastDmg: 0, lastType: 'normal', target: 0, heroHitT: 9, gauge,
+    };
   }
 
   private gainExp(n: number) {
@@ -338,69 +465,93 @@ export class Game {
     }
   }
 
-  private gainOrb(next: Mode = { m: 'map' }) {
-    this.s.orbs = Math.min(ORBS_FOR_WHEEL, this.s.orbs + 1);
-    this.mode = { m: 'orb', t: 0, next };
+  private gainOrbs(n: number, next: Mode) {
+    this.s.orbs = Math.min(ORBS_FOR_WHEEL, this.s.orbs + n);
+    this.mode = { m: 'orb', t: 0, gained: n, next };
     this.sfx('orb');
   }
 
   private openChest(item: ChestItem) {
     const tile = this.s.board[this.s.pos];
     if (tile) tile.done = true;
-    if (item === 'orb') this.gainOrb();
-    else if (item === 'slot') this.startSlot(false);
+    if (item === 'orb') this.gainOrbs(1, { m: 'map' });
+    else if (item === 'slot') this.startSlot(false, 1, { m: 'map' });
     else this.payout(Number(item.slice(1)), '宝箱');
   }
 
-  private startLoot(kind: EnemyKind) {
+  private startLoot(kind: EnemyKind, party: number) {
     const k = Math.min(2, kind) as 0 | 1 | 2;
-    this.mode = { m: 'loot', kind, cells: LOOT_CELLS[k], target: pick(LOOT_WEIGHTS[k], this.rand), t: 0, dur: 2.4 };
+    // 仲間が多いほど目が大きくなる（5枚単位）
+    const mul = 1 + 0.5 * (party - 1);
+    const cells = LOOT_CELLS[k].map((c) => (typeof c === 'number' ? Math.round((c * mul) / 5) * 5 : c));
+    this.mode = { m: 'loot', kind, party, cells, target: pick(LOOT_WEIGHTS[k], this.rand), t: 0, dur: 2.4 };
   }
 
-  private startSlot(jackpot: boolean) {
-    const key = jackpot ? 'jackpot' : 'chest';
+  // ---- スロット ----------------------------------------------------------------
+  private startSlot(jackpot: boolean, spins: number, next: Mode) {
+    const mode: SlotMode = { m: 'slot', jackpot, spin: 0, spins, reels: [], outcome: { k: 'medal', n: 0 }, t: 0, medals: 0, orbs: 0, dragon: false, next };
+    this.rollSlot(mode);
+    this.mode = mode;
+  }
+
+  /** 結果を先に決めて、それが見える図柄の並びを作る */
+  private rollSlot(md: SlotMode) {
+    const o = pick(md.jackpot ? JACKPOT_TABLE : CHEST_SLOT_TABLE, this.rand);
+    md.outcome = o;
+    md.t = 0;
     let reels: SlotSymbol[];
-    const r = this.rand();
-    if (r < SLOT_DRAGON_CHANCE[key]) {
-      reels = ['dragon', 'dragon', 'dragon'];
-    } else if (r < SLOT_DRAGON_CHANCE[key] + SLOT_MATCH_CHANCE[key]) {
-      const s = pick(SLOT_MATCH_TABLE, this.rand);
-      reels = [s, s, s];
+    if (o.k === 'dragon') reels = ['dragon', 'dragon', 'dragon'];
+    else if (o.k === 'medal') {
+      const sym = `m${o.n}` as SlotSymbol;
+      reels = [sym, sym, sym];
     } else {
-      // ハズレ（リーチ演出のため2つまでは揃うことがある）
-      const a = SLOT_SYMBOLS[Math.floor(this.rand() * SLOT_SYMBOLS.length)];
-      let c = SLOT_SYMBOLS[Math.floor(this.rand() * SLOT_SYMBOLS.length)];
-      const b = this.rand() < 0.4 ? a : SLOT_SYMBOLS[Math.floor(this.rand() * SLOT_SYMBOLS.length)];
-      if (a === b && c === a) c = SLOT_SYMBOLS[(SLOT_SYMBOLS.indexOf(a) + 1) % SLOT_SYMBOLS.length];
-      reels = [a, b, c];
+      // 宝玉 n 個: 宝玉の図柄が n 個出る。残りは揃わない小さなメダル図柄
+      const fill: SlotSymbol[] = ['m10', 'm20', 'm50'].sort(() => this.rand() - 0.5) as SlotSymbol[];
+      reels = [0, 1, 2].map((i) => (i < o.n ? 'orb' : fill[i])) as SlotSymbol[];
+      if (o.n < 3) reels.sort(() => this.rand() - 0.5);
     }
-    this.mode = { m: 'slot', jackpot, reels, t: 0 };
+    md.reels = reels;
+    void SLOT_SYMBOLS;
   }
 
-  private finishSlot(md: Extract<Mode, { m: 'slot' }>) {
-    const [a, b, c] = md.reels;
-    const next: Mode = md.jackpot ? { m: 'floor', t: 0, boss: false } : { m: 'map' };
-    if (md.jackpot) this.clearDungeon();
-    if (a === b && b === c) {
-      if (a === 'dragon') {
-        this.mode = { m: 'wheelIntro', t: 0, reason: 'slot', spins: 0 };
-        this.sfx('bigwin');
-        if (md.jackpot) this.afterWheel = next;
-        return;
-      }
-      if (a === 'orb') {
-        this.gainOrb(next);
-        return;
-      }
-      this.payout(SLOT_PAY[a] * (md.jackpot ? 2 : 1), md.jackpot ? 'ジャックポット' : 'スロット', next);
+  private applySlot(md: SlotMode) {
+    const o = md.outcome;
+    if (o.k === 'medal') {
+      md.medals += o.n;
+      this.addPayout(o.n);
+      this.sfx(o.n >= 100 ? 'bigwin' : 'win');
+    } else if (o.k === 'orb') {
+      md.orbs += o.n;
+      this.s.orbs = Math.min(ORBS_FOR_WHEEL, this.s.orbs + o.n);
+      this.sfx('orb');
+    } else {
+      md.dragon = true;
+      this.sfx('bigwin');
+    }
+  }
+
+  private nextSpin(md: SlotMode) {
+    md.spin++;
+    if (md.spin < md.spins && !md.dragon) {
+      this.rollSlot(md);
       return;
     }
-    this.payout(SLOT_CONSOLATION[md.jackpot ? 'jackpot' : 'chest'], md.jackpot ? 'ボス撃破ボーナス' : 'スロット', next);
+    // 全部回し終わった
+    if (md.dragon || this.s.orbs >= ORBS_FOR_WHEEL) {
+      if (!md.dragon) this.s.orbs = 0;
+      this.afterWheel = md.next;
+      this.mode = { m: 'wheelIntro', t: 0, reason: md.dragon ? 'slot' : 'orb', spins: 0 };
+      return;
+    }
+    if (md.medals > 0) {
+      this.mode = { m: 'get', amount: md.medals, t: 0, label: md.jackpot ? 'ジャックポット' : 'スロット' };
+      this.after = md.next;
+      return;
+    }
+    this.mode = md.next;
   }
 
-  /** 大ルーレットが終わった後に戻る先 */
-  private afterWheel: Mode | null = null;
-
+  // ---- 大ルーレット ------------------------------------------------------------
   private spinWheel(spins: number) {
     const target = Math.floor(this.rand() * WHEEL_CELLS.length);
     this.mode = { m: 'wheel', spins, target, waiting: true, t: 0 };
@@ -413,9 +564,7 @@ export class Game {
     const md = this.mode;
     if (md.m !== 'wheel') return;
     const cell = WHEEL_CELLS[md.target];
-    this.s.pendingPayout += cell.medals;
-    this.s.totals.paid += cell.medals;
-    this.events.push({ t: 'payout', n: cell.medals });
+    this.addPayout(cell.medals);
     this.sfx('bigwin');
     if (cell.dragon) {
       // 竜マーク: 連チャン
@@ -443,7 +592,7 @@ export class Game {
     if (md.m === 'floor' && md.boss) {
       // ボスの間
       this.s.floor = FLOORS_PER_DUNGEON;
-      this.s.board = [{ kind: 'start', done: true }, { kind: 'enemy', enemy: 3 }];
+      this.s.board = [{ kind: 'start', done: true }, { kind: 'enemy', enemy: 3, party: 1, element: ELEMS[Math.floor(this.rand() * 3)] }];
       this.s.pos = 0;
       this.heroX = 0;
       this.s.hp = this.maxHp;

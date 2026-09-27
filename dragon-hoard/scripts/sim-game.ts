@@ -1,5 +1,6 @@
 // ゲーム進行のヘッドレス検証: node --experimental-strip-types scripts/sim-game.ts [分]
-// 投入 3枚/秒、チェッカー当たり確率 1/8 として、止まる状態が無いか・配当の内訳を見る
+// 発射 3枚/秒。穴に入るのは7割。戦闘中は半分の確率で弱点レーンを狙い、それ以外は光る穴を狙って3割で当てる。
+// 止まる状態が無いか・配当の内訳を見る
 import { Game } from '../src/game/game.ts';
 
 const minutes = Number(process.argv[2] ?? 60);
@@ -13,7 +14,14 @@ let wheelAt = -1;
 for (let t = 0; t < minutes * 60; t += dt) {
   if (Math.random() < 3 * dt) {
     g.fed();
-    if (Math.random() < 1 / 8) g.checker();
+    if (Math.random() < 0.7) {
+      const b = g.battle;
+      let lane = Math.floor(Math.random() * 8);
+      if (b && Math.random() < 0.5) lane = Math.max(0, b.lanes.findIndex((l) => l !== 'miss' && l !== b.element && l === ({ fire: 'ice', ice: 'thunder', thunder: 'fire' } as const)[b.element]));
+      else if (!b && Math.random() < 0.3) lane = g.checkerLane;
+      g.lane(lane);
+    }
+    if (g.canSpecial) g.special();
   }
   g.update(dt);
   for (const e of g.events) {

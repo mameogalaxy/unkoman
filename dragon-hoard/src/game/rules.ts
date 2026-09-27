@@ -30,17 +30,47 @@ export const CHEST_TABLE: Weighted<ChestItem> = [
 
 export type EnemyKind = 0 | 1 | 2 | 3; // 弱・中・強・ボス
 export const ENEMY = [
-  { name: 'スライム', hp: 5, atk: 6, exp: 2 },
-  { name: 'コウモリ騎士', hp: 10, atk: 10, exp: 5 },
-  { name: '岩の番人', hp: 18, atk: 16, exp: 10 },
-  { name: '宝を喰らう竜', hp: 40, atk: 20, exp: 30 },
+  { name: 'スライム', hp: 6, atk: 6, exp: 2 },
+  { name: 'コウモリ騎士', hp: 14, atk: 10, exp: 5 },
+  { name: '岩の番人', hp: 26, atk: 16, exp: 10 },
+  { name: '宝を喰らう竜', hp: 70, atk: 22, exp: 30 },
 ] as const;
-/** 敵の攻撃間隔（秒） */
-export const ENEMY_ATTACK_EVERY = 7;
-/** 会心のダメージ倍率（投入1枚 = 1ダメージ） */
-export const CRIT_DAMAGE = 5;
+/** 敵パーティの人数（最小, 最大） */
+export const PARTY_SIZE: [number, number][] = [[1, 3], [1, 2], [1, 1], [1, 1]];
+/** 敵の攻撃間隔（秒）。仲間が多いほど短くなる */
+export const ENEMY_ATTACK_EVERY = 8;
 
-/** 戦利品ルーレット（敵の強さ別）。数値はメダル枚数 */
+// ---- 戦闘: レーンの属性 ------------------------------------------------------
+// 穴に入ったメダルのレーンで攻撃が決まる。敵の弱点属性なら大ダメージ、敵と同じ属性は吸収されて回復、ミスは空振り
+export type Elem = 'fire' | 'ice' | 'thunder';
+export const ELEMS: Elem[] = ['fire', 'ice', 'thunder'];
+export const ELEM_NAME: Record<Elem, string> = { fire: '炎', ice: '氷', thunder: '雷' };
+/** 弱点: 炎←氷, 氷←雷, 雷←炎 */
+export const WEAKNESS: Record<Elem, Elem> = { fire: 'ice', ice: 'thunder', thunder: 'fire' };
+export type LaneIcon = Elem | 'miss';
+export type HitType = 'normal' | 'weak' | 'absorb' | 'miss' | 'special';
+export const DAMAGE = { normal: 2, weak: 6, absorb: -3, special: 16 };
+/** 必殺技ゲージの増え方（満タン 100） */
+export const GAUGE = { normal: 12, weak: 25 };
+/** レーンの属性が入れ替わる間隔（秒） */
+export const LANE_SHUFFLE_EVERY = 6;
+/** 8レーンの内訳: 弱点2・吸収1・その他の属性3・ミス2 */
+export function battleLanes(enemy: Elem, rand: () => number): LaneIcon[] {
+  const weak = WEAKNESS[enemy];
+  const other = ELEMS.find((e) => e !== enemy && e !== weak)!;
+  const lanes: LaneIcon[] = [weak, weak, enemy, other, other, other, 'miss', 'miss'];
+  for (let i = lanes.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [lanes[i], lanes[j]] = [lanes[j], lanes[i]];
+  }
+  return lanes;
+}
+
+// ---- チェッカー --------------------------------------------------------------
+/** 光る穴がその場にとどまる秒数（最小, 最大）。当たるとすぐ別の穴へ移る */
+export const CHECKER_STAY: [number, number] = [2.5, 5];
+
+/** バトルボーナス（戦利品）ルーレット。ハズレなし。数値はメダル枚数で、敵パーティの人数で増える */
 export type Loot = number | 'orb' | 'slot';
 export const LOOT_CELLS: Loot[][] = [
   [5, 10, 5, 15, 'orb', 10],
@@ -53,19 +83,25 @@ export const LOOT_WEIGHTS: Weighted<number>[] = [
   [{ v: 0, w: 30 }, { v: 1, w: 20 }, { v: 2, w: 20 }, { v: 3, w: 8 }, { v: 4, w: 12 }, { v: 5, w: 10 }],
 ];
 
-/** スロットの図柄 */
-export type SlotSymbol = 'dragon' | 'm50' | 'm20' | 'm10' | 'orb';
-export const SLOT_SYMBOLS: SlotSymbol[] = ['dragon', 'm50', 'm20', 'm10', 'orb'];
-export const SLOT_PAY: Record<SlotSymbol, number> = { dragon: 0, m50: 50, m20: 20, m10: 10, orb: 0 };
-/** 竜が3つ揃う確率（宝箱スロット / ボス撃破のジャックポットスロット） */
-export const SLOT_DRAGON_CHANCE = { chest: 0.06, jackpot: 0.35 };
-/** 竜以外の3つ揃い */
-export const SLOT_MATCH_TABLE: Weighted<SlotSymbol> = [
-  { v: 'm10', w: 40 }, { v: 'm20', w: 25 }, { v: 'm50', w: 10 }, { v: 'orb', w: 10 },
+// ---- スロット ----------------------------------------------------------------
+export type SlotSymbol = 'dragon' | 'orb' | 'm300' | 'm100' | 'm50' | 'm20' | 'm10';
+export const SLOT_SYMBOLS: SlotSymbol[] = ['dragon', 'orb', 'm300', 'm100', 'm50', 'm20', 'm10'];
+/** スロットの結果: 宝玉 n 個 / メダル n 枚 / 竜（大ルーレット） */
+export type SlotOutcome = { k: 'orb'; n: number } | { k: 'medal'; n: number } | { k: 'dragon' };
+/** ボス撃破のジャックポットスロット（ダンジョンが深いほど回数が増える） */
+export const JACKPOT_TABLE: Weighted<SlotOutcome> = [
+  { v: { k: 'orb', n: 1 }, w: 28 }, { v: { k: 'orb', n: 2 }, w: 16 }, { v: { k: 'orb', n: 3 }, w: 8 },
+  { v: { k: 'medal', n: 50 }, w: 22 }, { v: { k: 'medal', n: 100 }, w: 14 }, { v: { k: 'medal', n: 300 }, w: 5 },
+  { v: { k: 'dragon' }, w: 7 },
 ];
-export const SLOT_MATCH_CHANCE = { chest: 0.45, jackpot: 0.5 };
-/** ハズレの残念賞 */
-export const SLOT_CONSOLATION = { chest: 5, jackpot: 30 };
+/** 宝箱のスロット */
+export const CHEST_SLOT_TABLE: Weighted<SlotOutcome> = [
+  { v: { k: 'medal', n: 10 }, w: 40 }, { v: { k: 'medal', n: 20 }, w: 25 }, { v: { k: 'medal', n: 50 }, w: 8 },
+  { v: { k: 'orb', n: 1 }, w: 22 }, { v: { k: 'dragon' }, w: 3 },
+];
+export function jackpotSpins(dungeon: number, loop: number) {
+  return Math.min(5, 1 + dungeon + loop);
+}
 
 /** 盤面 */
 export const FLOORS_PER_DUNGEON = 3;
