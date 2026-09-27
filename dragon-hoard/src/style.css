@@ -57,7 +57,19 @@ html, body {
   justify-content: center;
   background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
 }
-#bar button {
+#menu {
+  position: fixed;
+  right: 8px;
+  bottom: calc(64px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(20, 10, 4, 0.92);
+  border: 1px solid rgba(255, 210, 120, 0.5);
+  border-radius: 10px;
+}
+#bar button, #menu button {
   font: 600 14px -apple-system, sans-serif;
   color: #fff;
   background: rgba(40, 44, 60, 0.9);
@@ -66,7 +78,7 @@ html, body {
   padding: 10px 12px;
   touch-action: manipulation;
 }
-#bar button:active { background: rgba(120, 90, 30, 0.9); }
+#bar button:active, #menu button:active { background: rgba(120, 90, 30, 0.9); }
 #credits {
   position: fixed;
   top: max(8px, env(safe-area-inset-top));

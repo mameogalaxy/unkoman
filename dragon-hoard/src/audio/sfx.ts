@@ -1,7 +1,13 @@
-// 効果音はステージ1では WebAudio で合成する（素材の差し替えはステージ4）。
+// 効果音と BGM。外部素材が使えないので WebAudio で合成している（CC0 素材に差し替え可能）。
 // メダルの「チン」: 非整数倍の部分音の減衰和 + 短いノイズのアタック。
 
+import { Music } from './music.ts';
+
 export class Sfx {
+  music: Music | null = null;
+  /** 'all' = BGM と効果音 / 'sfx' = 効果音のみ / 'off' */
+  level: 'all' | 'sfx' | 'off' = 'all';
+  private wantSong = 'dungeon';
   private ctx: AudioContext | null = null;
   private clinks: AudioBuffer[] = [];
   private thud: AudioBuffer | null = null;
@@ -35,6 +41,9 @@ export class Sfx {
       return v * 0.6;
     }, 0.004));
     this.thud = this.synth(0.2, (t) => Math.sin(2 * Math.PI * 180 * t) * Math.exp(-t * 30) * 0.8, 0.02);
+    this.music = new Music(ctx, ctx.destination);
+    this.music.setEnabled(this.level === 'all');
+    this.music.play(this.wantSong);
     // 無音を鳴らして iOS のロックを外す
     const src = ctx.createBufferSource();
     src.buffer = ctx.createBuffer(1, 1, 22050);
@@ -53,6 +62,28 @@ export class Sfx {
       d[i] = f(t) + noise;
     }
     return buf;
+  }
+
+  /** 音量モードを順に切り替える */
+  cycleLevel() {
+    this.level = this.level === 'all' ? 'sfx' : this.level === 'sfx' ? 'off' : 'all';
+    this.enabled = this.level !== 'off';
+    this.music?.setEnabled(this.level === 'all');
+    return this.level;
+  }
+
+  /** 場面の曲 */
+  song(name: string) {
+    this.wantSong = name;
+    this.music?.play(name);
+  }
+
+  /** ホッパーの払い出し（ジャラジャラ） */
+  hopper(n: number) {
+    if (!this.clinks.length) return;
+    for (let k = 0; k < Math.min(6, n); k++) {
+      setTimeout(() => this.play(this.clinks[k % 3], 0.35, 1.1 + Math.random() * 0.3, -0.8), k * 45 + Math.random() * 20);
+    }
   }
 
   beginFrame() {

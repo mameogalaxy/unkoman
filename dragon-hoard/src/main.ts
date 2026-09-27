@@ -6,13 +6,14 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { Sfx } from './audio.ts';
+import { Sfx } from './audio/sfx.ts';
 import { Game, START_CREDITS } from './game/game.ts';
 import { clearSave, loadSave, writeSave } from './game/save.ts';
 import { PhysicsClient } from './physics/client.ts';
-import { FIELD, LANES, SHOOTER } from './physics/layout.ts';
+import { FIELD, HOPPER, LANES, SHOOTER, laneCenterX } from './physics/layout.ts';
 import { buildCabinet, WHEEL_POS } from './render/cabinet.ts';
 import { MedalRenderer } from './render/medals.ts';
+import { Lamps, Sparkles, type LampMode } from './render/fx.ts';
 import { LcdScreen } from './render/screen.ts';
 import { DungeonView } from './screen3d/dungeon.ts';
 import { LcdComposer } from './screen3d/lcd.ts';
@@ -185,6 +186,16 @@ async function main() {
   scene.add(cabinet.group);
   const medals = new MedalRenderer(CAPACITY, envMap);
   scene.add(medals.mesh);
+  const sparkles = new Sparkles(500);
+  scene.add(sparkles.points);
+  const lamps = new Lamps(cabinet.lampTubes);
+  scene.add(lamps.bulbs);
+  const GOLD = new THREE.Color(1, 0.75, 0.3);
+  // 大当たり中に筐体を染めるライト
+  const feverLight = new THREE.PointLight('#ffffff', 0, 90, 1.5);
+  feverLight.position.set(0, 40, -10);
+  scene.add(feverLight);
+  let shake = 0;
 
   physics.onSnapshot = (s) => {
     wins = s.wins;
@@ -193,6 +204,7 @@ async function main() {
       if (d.r === 'win') {
         sfx.win(d.x);
         game.won(1);
+        sparkles.burst(new THREE.Vector3(d.x, 0.5, 1), 5, GOLD, 12, 8);
       } else {
         sfx.lose(d.x);
       }
@@ -226,6 +238,7 @@ async function main() {
   let downAt: { x: number; y: number } | null = null;
   canvasEl.addEventListener('pointerdown', (e) => {
     sfx.unlock();
+    document.getElementById('menu')!.hidden = true;
     downAt = { x: e.clientX, y: e.clientY };
     if (!controls.enabled) aimFromPointer(e);
   });
@@ -271,7 +284,8 @@ async function main() {
   let showHud = qs.get('hud') === '1' || qs.get('debug') === '1';
   const hud = document.getElementById('hud')!;
   hud.hidden = !showHud;
-  document.getElementById('bar')!.addEventListener('click', (e) => {
+  const menu = document.getElementById('menu')!;
+  const onButton = (e: Event) => {
     const btn = (e.target as HTMLElement).closest('button');
     if (!btn) return;
     sfx.unlock();
@@ -314,16 +328,22 @@ async function main() {
         bloomOn = !bloomOn;
         btn.textContent = bloomOn ? '光 ON' : '光 OFF';
         break;
-      case 'sound':
-        sfx.enabled = !sfx.enabled;
-        btn.textContent = sfx.enabled ? '音 ON' : '音 OFF';
+      case 'sound': {
+        const lv = sfx.cycleLevel();
+        btn.textContent = lv === 'all' ? '音 BGM+効果音' : lv === 'sfx' ? '音 効果音のみ' : '音 OFF';
         break;
+      }
       case 'hud':
         showHud = !showHud;
         hud.hidden = !showHud;
         break;
+      case 'menu':
+        menu.hidden = !menu.hidden;
+        break;
     }
-  });
+  };
+  document.getElementById('bar')!.addEventListener('click', onButton);
+  menu.addEventListener('click', onButton);
   addEventListener('resize', resize);
   resize();
   applyCam(true);
@@ -375,14 +395,25 @@ async function main() {
         checkerHits++;
         screen.flashHit(e.lane, now);
         sfx.checker();
+        lamps.flash(new THREE.Color(3, 0.6, 0.2));
+        sparkles.burst(new THREE.Vector3(laneCenterX(e.lane), (LANES.holeBottomY + LANES.topY) / 2, LANES.frontZ + 0.5), 40, GOLD, 22, 6);
       }
-      else if (e.t === 'wheelSpin') cabinet.wheel.spin(e.target, () => game.wheelStopped());
+      else if (e.t === 'wheelSpin') {
+        cabinet.wheel.spin(e.target, () => {
+          game.wheelStopped();
+          sparkles.burst(WHEEL_POS.clone().add(new THREE.Vector3(0, 0, 3)), 220, GOLD, 45, 10);
+          lamps.flash(new THREE.Color(3, 2.6, 1.2));
+          shake = 0.6;
+        });
+      }
     }
     game.events.length = 0;
     // 払い出し: ホッパーへ少しずつ渡す（フィールドが満杯なら待つ）
     if (game.s.pendingPayout > 0 && s && s.payoutQueue < 4 && s.count < HOPPER_WAIT_COUNT) {
       const n = Math.min(4, game.s.pendingPayout);
       physics.payout(n);
+      sfx.hopper(n);
+      sparkles.burst(new THREE.Vector3(HOPPER.x + 1, HOPPER.y, HOPPER.z), 10, GOLD, 14, 4);
       game.s.pendingPayout -= n;
     }
     // 大ルーレットの間はカメラが寄る
@@ -422,9 +453,16 @@ async function main() {
     cabinet.shooter.pivot.rotation.x = 0.28;
     recoil = Math.max(0, recoil - dtFrame * 6);
     cabinet.shooter.barrel.position.z = recoil * 0.5;
-    const pulse = 0.75 + 0.25 * Math.sin(t * 3);
-    cabinet.lampTubes.color.setRGB(3.2 * pulse, 1.3 * pulse, 0.25 * pulse);
     cabinet.wheel.update(t, dtFrame);
+    // ランプと BGM は場面で切り替える
+    const mdl = game.mode;
+    const fever = mdl.m === 'wheelIntro' || mdl.m === 'wheel' || (mdl.m === 'get' && mdl.amount >= 100) || (mdl.m === 'slot' && mdl.jackpot);
+    const lampMode: LampMode = fever ? 'fever' : mdl.m === 'battle' ? (mdl.kind === 3 ? 'boss' : 'battle') : 'idle';
+    lamps.update(t, dtFrame, lampMode);
+    sparkles.update(dtFrame);
+    sfx.song(fever ? 'chance' : mdl.m === 'battle' || mdl.m === 'victory' ? (mdl.kind === 3 ? 'boss' : 'battle') : 'dungeon');
+    feverLight.intensity = fever ? 1500 * (0.6 + 0.4 * Math.sin(t * 12)) : 0;
+    if (fever) feverLight.color.setHSL((t * 0.5) % 1, 0.8, 0.6);
     creditsEl.textContent = `手持ち ${game.s.credits}枚` + (game.s.pendingPayout > 0 ? `  払い出し待ち ${game.s.pendingPayout}` : '');
 
     // カメラは目標へなめらかに寄る
@@ -433,6 +471,11 @@ async function main() {
       camera.position.lerp(camTarget.pos, k);
       camLook.lerp(camTarget.look, k);
       camera.lookAt(camLook);
+      if (shake > 0) {
+        shake = Math.max(0, shake - dtFrame);
+        camera.position.x += (Math.random() - 0.5) * shake * 1.2;
+        camera.position.y += (Math.random() - 0.5) * shake * 1.2;
+      }
     } else {
       controls.update();
     }

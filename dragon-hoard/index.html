@@ -14,16 +14,19 @@
     <div id="loading">メダルを積んでいます…</div>
     <div id="credits"></div>
     <div id="toast" hidden></div>
+    <div id="menu" hidden>
+      <button data-act="sound">音 BGM+効果音</button>
+      <button data-act="bloom">光 ON</button>
+      <button data-act="refill">メダル補充</button>
+      <button data-act="hud">計測表示</button>
+      <button data-act="reset">最初から</button>
+    </div>
     <div id="bar">
       <button data-act="special" hidden disabled>必殺技</button>
       <button data-act="drop">投入</button>
       <button data-act="auto">連射 OFF</button>
-      <button data-act="refill">メダル補充</button>
       <button data-act="cam">視点: 座席</button>
-      <button data-act="bloom">光 ON</button>
-      <button data-act="sound">音 ON</button>
-      <button data-act="hud">情報</button>
-      <button data-act="reset">最初から</button>
+      <button data-act="menu" aria-label="メニュー">≡</button>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
