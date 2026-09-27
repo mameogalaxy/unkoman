@@ -71,8 +71,8 @@ export class PhysicsClient {
     this.cmds.push({ t: 'add', m });
   }
 
-  feed(x: number, spin: number) {
-    this.cmds.push({ t: 'feed', x, spin });
+  shoot(x: number, jitter: number) {
+    this.cmds.push({ t: 'shoot', x, jitter });
   }
 
   payout(count: number) {

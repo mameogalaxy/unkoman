@@ -36,8 +36,8 @@ export class Engine {
       if (c.t === 'add') {
         const m = c.m;
         this.w.addMedal(m.x, m.y, m.z, undefined, { x: m.vx, y: m.vy, z: m.vz }, { x: m.wx, y: m.wy, z: m.wz });
-      } else if (c.t === 'feed') {
-        this.w.feedMedal(c.x, c.spin);
+      } else if (c.t === 'shoot') {
+        this.w.shootMedal(c.x, c.jitter);
       } else if (c.t === 'payout') {
         this.w.payoutQueue += c.count;
       } else if (c.t === 'reset') {

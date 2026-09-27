@@ -2,11 +2,10 @@
 // 1ステーション = フィールド + 液晶 + フード。周りに隣のステーションと中央の塔（大ルーレット・竜の像）を置く。
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { BACK_WALL, FIELD, HOPPER, LANES, PUSHER, SCREEN, laneCenterX } from '../physics/layout.ts';
+import { BACK_WALL, FIELD, HOPPER, LANES, PUSHER, SCREEN, SHOOTER, laneCenterX } from '../physics/layout.ts';
 import { canvas, goldOnWood, panelMaterial, scroll, tex } from './canvasKit.ts';
 import { dragonStatue, hopperHead } from './dragon.ts';
 import { createMedalMaps } from './medalTexture.ts';
-import type { LcdScreen } from './screen.ts';
 import { GiantWheel } from './wheel.ts';
 
 /** 八角形の中心（中央の塔の位置） */
@@ -18,8 +17,10 @@ export interface Cabinet {
   group: THREE.Group;
   pusher: THREE.Group;
   wheel: GiantWheel;
-  /** 投入口のノズル（狙いの位置に動く） */
-  aim: THREE.Object3D;
+  /** 手前の発射台（yaw で左右を向く） */
+  shooter: { pivot: THREE.Object3D; barrel: THREE.Object3D };
+  /** 狙っている穴の照準リング */
+  sight: THREE.Object3D;
   /** レーン上のランプ（チェッカー） */
   checkerLamps: THREE.MeshBasicMaterial[];
   /** 縁のオレンジのランプ管（点滅用） */
@@ -212,10 +213,23 @@ function stationShell(m: Mats, screenMat: THREE.Material, envMap: THREE.Texture 
     tip.position.set(-W + lw * k, LANES.bottomY, BACK_WALL.frontZ + depth / 2);
     g.add(tip);
   }
-  // レーン前のガラスと、投入口のレール
-  const lg = boxAt(g, W * 2, fh, 0.1, m.glass, 0, LANES.bottomY + 0.6 + fh / 2, LANES.frontZ + 0.05, false);
+  // 穴の下のガラス板、穴の下辺（金）、穴の上の横木（金）
+  const lowH = LANES.holeBottomY - (LANES.bottomY + 0.6);
+  const lg = boxAt(g, W * 2, lowH, 0.16, m.glass, 0, LANES.bottomY + 0.6 + lowH / 2, LANES.frontZ + 0.08, false);
   lg.renderOrder = 11;
-  boxAt(g, W * 2, 0.9, 2.4, m.gold, 0, SCREEN.bottomY - 0.6, BACK_WALL.frontZ + 1.2);
+  boxAt(g, W * 2, 0.28, 0.5, m.gold, 0, LANES.holeBottomY - 0.14, LANES.frontZ + 0.1);
+  boxAt(g, W * 2, 0.6, 1.3, m.gold, 0, LANES.topY + 0.3, LANES.frontZ - 0.3);
+  // 穴のふち（銀の枠）
+  for (let k = 0; k < LANES.count; k++) {
+    const x = laneCenterX(k);
+    const hw = lw / 2 - LANES.fingerThickness / 2;
+    const hh = LANES.topY - LANES.holeBottomY;
+    const frame = new THREE.Mesh(new THREE.TorusGeometry(1, 0.09, 6, 4), m.chrome);
+    frame.rotation.z = Math.PI / 4;
+    frame.scale.set(hw * Math.SQRT2 * 0.98, hh * Math.SQRT2 * 0.5 * 0.98, 1);
+    frame.position.set(x, (LANES.holeBottomY + LANES.topY) / 2, LANES.frontZ + 0.05);
+    g.add(frame);
+  }
   // 奥壁の上段より下（プッシャーが出入りする口の上の縁）
   boxAt(g, W * 2, 0.6, 0.8, m.chrome, 0, by + 0.3, BACK_WALL.frontZ + 0.2);
 
@@ -349,15 +363,15 @@ function bakeStatic(root: THREE.Object3D, exclude: Set<THREE.Object3D>) {
   }
 }
 
-export function buildCabinet(envMap: THREE.Texture | null, screen: LcdScreen): Cabinet {
+export function buildCabinet(envMap: THREE.Texture | null, screenTex: THREE.Texture): Cabinet {
   const m = makeMats(envMap);
   const group = new THREE.Group();
-  const screenMat = new THREE.MeshBasicMaterial({ map: screen.texture, toneMapped: false });
+  const screenMat = new THREE.MeshBasicMaterial({ map: screenTex, toneMapped: false });
   screenMat.color.setScalar(1.05);
   group.add(stationShell(m, screenMat, envMap, true));
 
   // 隣のステーション（中央の塔のまわりに 45° ずつ）。液晶は暗めの別素材
-  const sideScreen = new THREE.MeshBasicMaterial({ map: screen.texture, toneMapped: false, color: new THREE.Color(0.55, 0.55, 0.6) });
+  const sideScreen = new THREE.MeshBasicMaterial({ map: screenTex, toneMapped: false, color: new THREE.Color(0.55, 0.55, 0.6) });
   for (const k of [-2, -1, 1, 2]) {
     const pivot = new THREE.Group();
     pivot.position.copy(TOWER_CENTER);
@@ -387,23 +401,43 @@ export function buildCabinet(envMap: THREE.Texture | null, screen: LcdScreen): C
   neck.position.set(HOPPER.x - 5.2, HOPPER.y - 1.2, HOPPER.z);
   group.add(neck);
 
-  // 投入口のノズルと、チェッカーのランプ列
-  const aim = new THREE.Group();
-  const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(1.7, 1.2, 1.4, 16), m.chrome);
-  nozzle.position.set(0, SCREEN.bottomY - 0.2, LANES.frontZ + 0.6);
-  aim.add(nozzle);
-  const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.1, 3), new THREE.MeshBasicMaterial({ color: new THREE.Color(2.5, 2.2, 1.2), toneMapped: false }));
-  arrow.position.set(0, SCREEN.bottomY - 1.3, LANES.frontZ + 1.4);
-  arrow.rotation.x = Math.PI;
-  aim.add(arrow);
-  group.add(aim);
+  // 手前中央の発射台（細い支柱の上の金の砲身）
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.4, SHOOTER.y + 1, 12), m.chrome);
+  post.position.set(SHOOTER.x, (SHOOTER.y - 1) / 2 - 0.3, SHOOTER.z + 1.2);
+  group.add(post);
+  const pivot = new THREE.Group();
+  pivot.position.set(SHOOTER.x, SHOOTER.y, SHOOTER.z + 1.2);
+  const housing = new THREE.Mesh(new THREE.SphereGeometry(0.95, 20, 14), m.gold);
+  pivot.add(housing);
+  const barrel = new THREE.Group();
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.78, 2.4, 20, 1, true), m.gold);
+  tube.rotation.x = Math.PI / 2;
+  tube.position.z = -1.2;
+  (tube.material as THREE.Material).side = THREE.DoubleSide;
+  barrel.add(tube);
+  const muzzle = new THREE.Mesh(new THREE.TorusGeometry(0.66, 0.12, 8, 24), m.chrome);
+  muzzle.position.z = -2.4;
+  barrel.add(muzzle);
+  const bore = new THREE.Mesh(new THREE.CircleGeometry(0.6, 20), m.dark);
+  bore.position.z = -1.0;
+  barrel.add(bore);
+  pivot.add(barrel);
+  group.add(pivot);
+  // 照準（狙っている穴を囲む光る枠）
+  const sight = new THREE.Mesh(new THREE.TorusGeometry(1, 0.12, 6, 4),
+    new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 2.4, 1.2), toneMapped: false }));
+  sight.rotation.z = Math.PI / 4;
+  const shw = (FIELD.innerHalfWidth * 2) / LANES.count / 2;
+  sight.scale.set(shw * Math.SQRT2, (LANES.topY - LANES.holeBottomY) * Math.SQRT2 * 0.5, 1);
+  sight.position.set(0, (LANES.holeBottomY + LANES.topY) / 2, LANES.frontZ + 0.25);
+  group.add(sight);
 
   const checkerLamps: THREE.MeshBasicMaterial[] = [];
   for (let i = 0; i < LANES.count; i++) {
     const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.3, 0.08, 0.05), toneMapped: false });
-    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.55, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), mat);
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), mat);
     lamp.rotation.x = Math.PI / 2;
-    lamp.position.set(laneCenterX(i), SCREEN.bottomY - 0.6, BACK_WALL.frontZ + 2.4);
+    lamp.position.set(laneCenterX(i), LANES.topY + 0.3, LANES.frontZ + 0.36);
     group.add(lamp);
     checkerLamps.push(mat);
   }
@@ -414,5 +448,5 @@ export function buildCabinet(envMap: THREE.Texture | null, screen: LcdScreen): C
   floor.position.y = -24;
   group.add(floor);
 
-  return { group, pusher, wheel: t.wheel, aim, checkerLamps, lampTubes: m.tube };
+  return { group, pusher, wheel: t.wheel, shooter: { pivot, barrel }, sight, checkerLamps, lampTubes: m.tube };
 }

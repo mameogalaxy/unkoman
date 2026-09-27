@@ -38,15 +38,25 @@ export const BACK_WALL = {
 // これより下に落ちたメダルは判定して削除する
 export const KILL_Y = -4;
 
-// 画面の下のレーン（チェッカー）。奥壁の前に銀の仕切りが並び、メダルはこの間を縦に落ちて上段へ入る。
+// 画面の下のレーン（チェッカー）。奥壁の前に銀の仕切りが並び、手前の板に8つの穴が開いている。
+// 手前の発射台から飛ばしたメダルが穴に入ると、仕切りの間を縦に落ちて上段へ出る。
 export const LANES = {
   count: 8,
-  frontZ: BACK_WALL.frontZ + 1.5, // 仕切りの手前端
+  frontZ: BACK_WALL.frontZ + 1.5, // 仕切りの手前端 = 穴の面
   bottomY: 4.7, // 仕切りの下端（上段のメダルの山より上）
-  topY: 9.6,
+  holeBottomY: 8.0, // 穴の下辺
+  topY: 11.2, // 穴の上辺 = 仕切りの上端
   fingerThickness: 0.36,
   sensorY: 5.4, // この高さを通過したら「レーン通過」
-  feedY: 10.6, // 投入口の高さ
+} as const;
+
+// 手前中央の発射台
+export const SHOOTER = {
+  x: 0,
+  y: 9.0,
+  z: 2.5,
+  /** 穴まで飛ぶ時間（秒）。短いほど低く速い弾道 */
+  flightTime: 0.19,
 } as const;
 
 export function laneCenterX(i: number) {

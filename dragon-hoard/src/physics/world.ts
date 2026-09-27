@@ -1,5 +1,5 @@
 import RAPIER from '@dimforge/rapier3d-compat';
-import { BACK_WALL, FIELD, HOPPER, KILL_Y, LANES, MEDAL, PUSHER } from './layout.ts';
+import { BACK_WALL, FIELD, HOPPER, KILL_Y, LANES, MEDAL, PUSHER, SHOOTER } from './layout.ts';
 
 export type DropResult = 'win' | 'lose';
 
@@ -59,6 +59,8 @@ export class MedalWorld {
   private events: RAPIER.EventQueue;
   /** このフレームで通過したレーン（チェッカー判定用） */
   readonly laneHits: number[] = [];
+  /** レーンを通過済みのメダル（collider handle）。1枚を2回数えないように */
+  private passed = new Set<number>();
   /** ホッパーの払い出し待ち枚数 */
   payoutQueue = 0;
   private payoutTimer = 0;
@@ -119,8 +121,13 @@ export class MedalWorld {
     }
     // 奥壁（プッシャー上面の少し上から）
     const by = PUSHER.height + BACK_WALL.gap;
-    this.box(W, BACK_WALL.height / 2, BACK_WALL.thickness / 2, 0, by + BACK_WALL.height / 2,
-      BACK_WALL.frontZ - BACK_WALL.thickness / 2, 0.2);
+    this.world.createCollider(
+      RAPIER.ColliderDesc.cuboid(W, BACK_WALL.height / 2, BACK_WALL.thickness / 2)
+        .setTranslation(0, by + BACK_WALL.height / 2, BACK_WALL.frontZ - BACK_WALL.thickness / 2)
+        .setFriction(0.4)
+        .setRestitution(0)
+        .setRestitutionCombineRule(RAPIER.CoefficientCombineRule.Min),
+    );
     // 最奥のふた
     this.box(W, 10, t, 0, 10, backZ - t, 0.2);
   }
@@ -136,12 +143,16 @@ export class MedalWorld {
         RAPIER.ColliderDesc.cuboid(LANES.fingerThickness / 2, h / 2, depth / 2)
           .setTranslation(-W + lw * k, LANES.bottomY + h / 2, zc)
           .setFriction(0.15)
-          .setRestitution(0.3),
+          .setRestitution(0.05),
       );
     }
-    // レーンの手前の薄いガラス（メダルが手前に倒れて飛び出さないように）
+    // 穴の下の板（ガラス）と、穴の上の横木
+    const lowH = LANES.holeBottomY - (LANES.bottomY + 0.6);
     this.world.createCollider(
-      RAPIER.ColliderDesc.cuboid(W, h / 2, 0.05).setTranslation(0, LANES.bottomY + 0.6 + h / 2, LANES.frontZ + 0.05).setFriction(0.1),
+      RAPIER.ColliderDesc.cuboid(W, lowH / 2, 0.08).setTranslation(0, LANES.bottomY + 0.6 + lowH / 2, LANES.frontZ + 0.08).setFriction(0.1),
+    );
+    this.world.createCollider(
+      RAPIER.ColliderDesc.cuboid(W, 0.3, 0.6).setTranslation(0, LANES.topY + 0.3, LANES.frontZ - 0.3).setFriction(0.1),
     );
     for (let k = 0; k < LANES.count; k++) {
       const c = this.world.createCollider(
@@ -158,14 +169,25 @@ export class MedalWorld {
     );
   }
 
-  /** 投入: 画面下の投入口から、縦向きのメダルをレーンへ落とす */
-  feedMedal(x: number, spin: number) {
-    const W = FIELD.innerHalfWidth - 1.4;
-    const cx = Math.max(-W, Math.min(W, x));
-    // 円柱の軸（Y）を Z に向ける = 面がプレイヤーを向いて立つ
+  /**
+   * 投入: 手前の発射台から、狙った x の穴へ向けてメダルを飛ばす。
+   * 立てた向き（面がプレイヤーを向く）で飛び、穴に入れば仕切りの間を落ちる。
+   */
+  shootMedal(targetX: number, jitter: number) {
+    const W = FIELD.innerHalfWidth - 1.0;
+    const tx = Math.max(-W, Math.min(W, targetX)) + (Math.random() - 0.5) * jitter;
+    const ty = (LANES.holeBottomY + LANES.topY) / 2 + (Math.random() - 0.5) * jitter;
+    const tz = LANES.frontZ - 0.6;
+    const T = SHOOTER.flightTime * (1 + (Math.random() - 0.5) * 0.04);
+    const g = 981;
+    const v = {
+      x: (tx - SHOOTER.x) / T,
+      y: (ty - SHOOTER.y + 0.5 * g * T * T) / T,
+      z: (tz - SHOOTER.z) / T,
+    };
     const s = Math.SQRT1_2;
-    this.addMedal(cx, LANES.feedY, (BACK_WALL.frontZ + LANES.frontZ) / 2, { x: s, y: 0, z: 0, w: s },
-      { x: 0, y: -35, z: 0 }, { x: 0, y: 0, z: spin });
+    // 円柱の軸（Y）を Z に向ける = 面がプレイヤーを向いて立つ
+    this.addMedal(SHOOTER.x, SHOOTER.y, SHOOTER.z, { x: s, y: 0, z: 0, w: s }, v, { x: 0, y: 0, z: (Math.random() - 0.5) * 6 }, true);
   }
 
   private spawnPayout() {
@@ -208,6 +230,7 @@ export class MedalWorld {
     q: { x: number; y: number; z: number; w: number } = { x: 0, y: 0, z: 0, w: 1 },
     v?: { x: number; y: number; z: number },
     w?: { x: number; y: number; z: number },
+    ccd = false,
   ): number {
     if (this.count >= this.capacity) return -1;
     const desc = RAPIER.RigidBodyDesc.dynamic()
@@ -218,6 +241,8 @@ export class MedalWorld {
       .setAngularDamping(0.15)
       .setLinearDamping(0.05);
     if (v) desc.setLinvel(v.x, v.y, v.z);
+    // 速く飛ぶメダル（発射）は薄い仕切りや板をすり抜けないよう連続衝突判定
+    if (ccd) desc.setCcdEnabled(true);
     if (w) desc.setAngvel(w);
     const body = this.world.createRigidBody(desc);
     const cd = RAPIER.ColliderDesc.cylinder(MEDAL.halfThickness, MEDAL.radius)
@@ -237,6 +262,7 @@ export class MedalWorld {
   }
 
   private removeAt(i: number) {
+    this.passed.delete(this.bodies[i].collider(0).handle);
     this.world.removeRigidBody(this.bodies[i]);
     const last = --this.count;
     if (i !== last) {
@@ -274,8 +300,13 @@ export class MedalWorld {
     this.world.step(this.events);
     this.events.drainCollisionEvents((h1, h2, started) => {
       if (!started) return;
-      const lane = this.laneSensors.get(h1) ?? this.laneSensors.get(h2);
-      if (lane !== undefined) this.laneHits.push(lane);
+      const s1 = this.laneSensors.get(h1);
+      const lane = s1 ?? this.laneSensors.get(h2);
+      if (lane === undefined) return;
+      const medal = s1 !== undefined ? h2 : h1;
+      if (this.passed.has(medal)) return;
+      this.passed.add(medal);
+      this.laneHits.push(lane);
     });
     this.stats.lastStepMs = performance.now() - t0;
   }

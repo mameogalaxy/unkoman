@@ -1,11 +1,11 @@
 // 奥壁の液晶画面。ゲームの状態（src/game/game.ts）を読んで毎フレーム（最大30fps）描き直す。
 import * as THREE from 'three';
 import type { Game } from '../game/game.ts';
-import { DUNGEON_NAMES, ENEMY, FLOORS_PER_DUNGEON, ORBS_FOR_WHEEL, MAX_STOCK, SLOT_SYMBOLS, type Loot, type StepCell } from '../game/rules.ts';
+import { DUNGEON_NAMES, ENEMY, ORBS_FOR_WHEEL, MAX_STOCK, SLOT_SYMBOLS, type Loot, type StepCell } from '../game/rules.ts';
 import { LANES } from '../physics/layout.ts';
 import {
-  JP, LATIN, bigText, drawChest, drawDragonMark, drawEnemy, drawHero, drawMedalIcon, drawOrb, drawSlotSymbol,
-  dungeonStrip, goldFrame, goldGrad, roundRect,
+  JP, LATIN, bigText, drawDragonMark, drawHero, drawMedalIcon, drawOrb, drawSlotSymbol,
+  goldFrame, goldGrad, roundRect,
 } from './art.ts';
 import { canvas, type Ctx } from './canvasKit.ts';
 
@@ -13,9 +13,6 @@ const W = 1024;
 const H = 768;
 const TOP = 124; // HUD の下
 const BOTTOM = H - 86; // レーンのマークの上
-const TILE = 170;
-const HERO_X = 250;
-const FLOOR_Y = 596;
 
 const ease = (x: number) => 1 - (1 - Math.min(1, Math.max(0, x))) ** 3;
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
@@ -29,7 +26,6 @@ function rouletteIndex(n: number, target: number, t: number, dur: number, laps =
 export class LcdScreen {
   readonly texture: THREE.CanvasTexture;
   private out: { cv: HTMLCanvasElement; ctx: Ctx };
-  private strips: HTMLCanvasElement[] = [];
   private lit = -1;
   private hitUntil = 0;
   private hitLane = -1;
@@ -43,12 +39,10 @@ export class LcdScreen {
     this.texture = new THREE.CanvasTexture(this.out.cv);
     this.texture.colorSpace = THREE.SRGBColorSpace;
     this.texture.anisotropy = 4;
-    this.refreshBase();
   }
 
-  refreshBase() {
-    this.strips = [0, 1, 2, 3].map((k) => dungeonStrip(k, 1024, BOTTOM - TOP));
-  }
+  /** フォント読み込み後に呼ぶ（今は毎フレーム描き直すので何もしない） */
+  refreshBase() {}
 
   setChecker(lane: number) {
     this.lit = lane;
@@ -59,84 +53,30 @@ export class LcdScreen {
     this.hitUntil = now + 1000;
   }
 
-  update(now: number, g: Game) {
-    if (now - this.lastDraw < 32) return;
+  /** 3D の上に重ねる文字・パネルを描く。描いたら true（30fps に間引く） */
+  update(now: number, g: Game): boolean {
+    if (now - this.lastDraw < 32) return false;
     this.lastDraw = now;
     const ctx = this.out.ctx;
     const t = now / 1000;
-    const md = g.mode;
-    ctx.save();
-    // 画面の揺れ（被弾・会心）
-    if (md.m === 'battle' && (md.heroHitT < 0.3 || (md.crit && md.hitT < 0.3))) {
-      ctx.translate((Math.random() - 0.5) * 16, (Math.random() - 0.5) * 12);
-    }
+    ctx.clearRect(0, 0, W, H);
     this.drawWorld(ctx, g, t);
-    ctx.restore();
     this.drawOverlay(ctx, g, t);
     this.drawHud(ctx, g, t);
     this.drawLanes(ctx, now);
     this.texture.needsUpdate = true;
+    return true;
   }
+
+  /** HUD の顔（3D の主人公を描いたもの） */
+  portrait: HTMLCanvasElement | null = null;
 
   // ---- 背景の世界（通路 or 戦闘） --------------------------------------------
   private drawWorld(ctx: Ctx, g: Game, t: number) {
     const md = g.mode;
-    const theme = g.s.dungeon % 4;
-    const strip = this.strips[theme];
     const battle = md.m === 'battle' || md.m === 'victory' || md.m === 'retreat' || md.m === 'loot';
-    const camX = g.heroX * TILE;
-    // 奥の壁（パララックス）
-    const off = -((camX * 0.5) % strip.width);
-    for (let x = off; x < W; x += strip.width) ctx.drawImage(strip, x, TOP);
-    // たいまつ
-    for (let k = -1; k < 6; k++) {
-      const x = ((k * 256 - camX * 0.5) % (256 * 5) + 256 * 5) % (256 * 5) - 100;
-      const f = 0.8 + Math.sin(t * 13 + k * 3) * 0.1 + Math.sin(t * 7 + k) * 0.1;
-      const gl = ctx.createRadialGradient(x, TOP + 180, 0, x, TOP + 180, 120 * f);
-      gl.addColorStop(0, 'rgba(255,220,140,0.55)');
-      gl.addColorStop(1, 'rgba(255,160,60,0)');
-      ctx.fillStyle = gl;
-      ctx.fillRect(x - 130, TOP + 50, 260, 260);
-      ctx.fillStyle = '#ffdc80';
-      ctx.beginPath();
-      ctx.ellipse(x, TOP + 175, 9 * f, 18 * f, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#5a3a20';
-      ctx.fillRect(x - 5, TOP + 190, 10, 40);
-    }
-    if (battle) {
-      ctx.fillStyle = 'rgba(10,0,20,0.35)';
-      ctx.fillRect(0, TOP, W, BOTTOM - TOP);
-      return this.drawBattle(ctx, g, t);
-    }
-    // 盤面のマス
+    if (battle) return this.drawBattle(ctx, g, t);
     const b = g.s.board;
-    for (let i = 0; i < b.length; i++) {
-      const x = HERO_X + (i - g.heroX) * TILE;
-      if (x < -120 || x > W + 120) continue;
-      const tile = b[i];
-      const pg = ctx.createRadialGradient(x, FLOOR_Y - 6, 10, x, FLOOR_Y, 80);
-      pg.addColorStop(0, tile.kind === 'stairs' ? '#f8e39a' : '#b8aa94');
-      pg.addColorStop(1, tile.kind === 'stairs' ? '#8a6a20' : '#4a4034');
-      ctx.fillStyle = pg;
-      ctx.beginPath();
-      ctx.ellipse(x, FLOOR_Y, 70, 22, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,230,160,0.5)';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      if (i === g.s.pos) continue;
-      if (tile.kind === 'chest') drawChest(ctx, x, FLOOR_Y - 6, 70, tile.done ? 1 : 0, tile.chest === 'slot' || tile.chest === 'orb');
-      else if (tile.kind === 'enemy' && !tile.done) drawEnemy(ctx, tile.enemy!, x, FLOOR_Y - 4, tile.enemy === 3 ? 150 : 80, t + i);
-      else if (tile.kind === 'stairs') {
-        ctx.fillStyle = '#1a0e06';
-        for (let k = 0; k < 4; k++) ctx.fillRect(x - 40 + k * 8, FLOOR_Y - 40 - k * 16, 80 - k * 16, 14);
-        bigText(ctx, g.s.floor + 1 >= FLOORS_PER_DUNGEON ? 'BOSS' : 'EXIT', x, FLOOR_Y - 110, 34);
-      }
-    }
-    // 主人公
-    const walking = md.m === 'move' || Math.abs(g.heroX - g.s.pos) > 0.01;
-    drawHero(ctx, HERO_X, FLOOR_Y - 4, 130, t, walking ? 'walk' : 'idle');
     // 階層の見出しと進み具合
     const name = `${DUNGEON_NAMES[g.s.dungeon % 4]}  ${g.isBossFloor ? 'ボスの間' : `地下${g.s.floor + 1}階`}`;
     ctx.fillStyle = 'rgba(30,10,0,0.6)';
@@ -156,31 +96,11 @@ export class LcdScreen {
     ctx.textBaseline = 'alphabetic';
   }
 
-  private drawBattle(ctx: Ctx, g: Game, t: number) {
+  private drawBattle(ctx: Ctx, g: Game, _t: number) {
     const md = g.mode;
     const kind = md.m === 'battle' || md.m === 'victory' || md.m === 'loot' ? md.kind : (g.s.battle?.kind ?? 0);
     const boss = kind === 3;
-    const ex = 640, ey = FLOOR_Y + 10;
-    let alpha = 1;
-    let dy = 0;
-    if (md.m === 'victory') {
-      alpha = 1 - clamp01(md.t / 0.8);
-      dy = md.t * 40;
-    }
-    if (md.m !== 'loot') {
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      const hitFlash = md.m === 'battle' && md.hitT < 0.12;
-      if (md.m === 'battle' && md.hitT < 0.25) ctx.translate(Math.sin(md.hitT * 90) * 10, 0);
-      drawEnemy(ctx, kind, ex, ey + dy, boss ? 300 : 230, t);
-      if (hitFlash) {
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.globalAlpha = 0.5;
-        drawEnemy(ctx, kind, ex, ey, boss ? 300 : 230, t);
-      }
-      ctx.restore();
-    }
-    drawHero(ctx, 230, FLOOR_Y + 30, 150, t, md.m === 'battle' && md.hitT < 0.3 ? 'attack' : 'idle');
+    const ex = W / 2 - 40, ey = 520;
     if (md.m === 'battle') {
       // 敵の HP
       const bw = 420;
@@ -203,7 +123,7 @@ export class LcdScreen {
       if (md.hitT < 0.8) {
         const k = md.hitT / 0.8;
         ctx.globalAlpha = 1 - k;
-        bigText(ctx, `${md.lastDmg}`, ex + 60, ey - (boss ? 330 : 250) - k * 60, md.crit ? 96 : 64, LATIN, 900,
+        bigText(ctx, `${md.lastDmg}`, ex + 60, ey - (boss ? 330 : 260) - k * 60, md.crit ? 96 : 64, LATIN, 900,
           md.crit ? '#ffef6a' : '#ffffff');
         if (md.crit) bigText(ctx, '会心の一撃！', ex, ey - 120, 60, JP, 400, '#ffd23a');
         ctx.globalAlpha = 1;
@@ -212,7 +132,7 @@ export class LcdScreen {
       if (md.heroHitT < 0.6) {
         ctx.fillStyle = `rgba(255,0,0,${0.35 * (1 - md.heroHitT / 0.6)})`;
         ctx.fillRect(0, TOP, W, BOTTOM - TOP);
-        bigText(ctx, `-${ENEMY[kind].atk}`, 230, FLOOR_Y - 220 - md.heroHitT * 40, 60, LATIN, 900, '#ff6a5a');
+        bigText(ctx, `-${ENEMY[kind].atk}`, 780, 470 - md.heroHitT * 40, 60, LATIN, 900, '#ff6a5a');
       }
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
       roundRect(ctx, 250, BOTTOM - 54, 524, 44, 20);
@@ -262,12 +182,8 @@ export class LcdScreen {
       }
       case 'chest': {
         const open = clamp01((md.t - 0.6) / 0.5);
-        ctx.fillStyle = 'rgba(0,0,0,0.4)';
-        ctx.fillRect(0, TOP, W, BOTTOM - TOP);
-        const shake = md.t < 0.6 ? Math.sin(md.t * 60) * 6 : 0;
-        drawChest(ctx, W / 2 + shake, 560, 230, open, md.item === 'slot' || md.item === 'orb');
         if (open > 0) {
-          const y = 470 - ease(open) * 140;
+          const y = 420 - ease(open) * 140;
           if (md.item === 'orb') drawOrb(ctx, W / 2, y, 60, (g.s.orbs * 45) % 360);
           else if (md.item === 'slot') drawDragonMark(ctx, W / 2, y, 64);
           else drawMedalIcon(ctx, W / 2, y, 64, md.item.slice(1));
@@ -464,7 +380,8 @@ export class LcdScreen {
   // ---- 上部の HUD ------------------------------------------------------------
   private drawHud(ctx: Ctx, g: Game, t: number) {
     goldFrame(ctx, 12, 8, 430, 110);
-    drawHero(ctx, 68, 108, 70, t, 'idle');
+    if (this.portrait) ctx.drawImage(this.portrait, 24, 18, 88, 90);
+    else drawHero(ctx, 68, 108, 70, t, 'idle');
     ctx.strokeStyle = '#f1c14e';
     ctx.lineWidth = 3;
     ctx.strokeRect(24, 18, 88, 90);

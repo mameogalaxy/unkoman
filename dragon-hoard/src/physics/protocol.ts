@@ -14,7 +14,7 @@ export interface FieldLayout {
 
 export type Command =
   | { t: 'add'; m: MedalSpawn }
-  | { t: 'feed'; x: number; spin: number }
+  | { t: 'shoot'; x: number; jitter: number }
   | { t: 'payout'; count: number }
   | { t: 'reset'; count: number; seed: number };
 

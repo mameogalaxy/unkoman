@@ -10,10 +10,12 @@ import { Sfx } from './audio.ts';
 import { Game, START_CREDITS } from './game/game.ts';
 import { clearSave, loadSave, writeSave } from './game/save.ts';
 import { PhysicsClient } from './physics/client.ts';
-import { BACK_WALL, FIELD, LANES } from './physics/layout.ts';
+import { FIELD, LANES, SHOOTER } from './physics/layout.ts';
 import { buildCabinet, WHEEL_POS } from './render/cabinet.ts';
 import { MedalRenderer } from './render/medals.ts';
 import { LcdScreen } from './render/screen.ts';
+import { DungeonView } from './screen3d/dungeon.ts';
+import { LcdComposer } from './screen3d/lcd.ts';
 
 // ---- 検証用のURLパラメータ ------------------------------------------------
 // ?n=300      初期メダル枚数
@@ -22,7 +24,7 @@ import { LcdScreen } from './render/screen.ts';
 // ?bloom=0    光のにじみ（ブルーム）なし
 // ?dpr=1.5    描画解像度の倍率の上限
 // ?hz=60      物理の固定ステップ
-// ?cam=0..3   初期視点
+// ?cam=0..4   初期視点
 const qs = new URLSearchParams(location.search);
 const INITIAL = Number(qs.get('n') ?? 300);
 const HZ = Number(qs.get('hz') ?? 60);
@@ -84,6 +86,7 @@ const CAMS = [
   { name: '座席', pos: new THREE.Vector3(0, 25.5, 11), look: new THREE.Vector3(0, 15.5, -22) },
   { name: 'フィールド', pos: new THREE.Vector3(0, 40, 14), look: new THREE.Vector3(0, 0, -13) },
   { name: 'ルーレット', pos: new THREE.Vector3(0, 60, 10), look: WHEEL_POS.clone() },
+  { name: '液晶', pos: new THREE.Vector3(0, 22.85, 2), look: new THREE.Vector3(0, 22.85, -27) },
   { name: '自由', pos: new THREE.Vector3(30, 50, 70), look: new THREE.Vector3(0, 20, -30) },
 ];
 let camIndex = Number(qs.get('cam') ?? 0) % CAMS.length;
@@ -182,7 +185,11 @@ async function main() {
   towerLight.target.position.copy(WHEEL_POS);
   scene.add(towerLight, towerLight.target);
 
-  const cabinet = buildCabinet(envMap, screen);
+  // 液晶: 3D ダンジョン + 文字の重ね描き
+  const dungeon = new DungeonView(envMap);
+  const lcd = new LcdComposer(dungeon, screen.texture);
+  screen.portrait = dungeon.renderPortrait(renderer);
+  const cabinet = buildCabinet(envMap, lcd.texture);
   scene.add(cabinet.group);
   const medals = new MedalRenderer(CAPACITY, envMap);
   scene.add(medals.mesh);
@@ -224,12 +231,12 @@ async function main() {
   // 画面を左右にドラッグして狙いを動かし、タップで投入
   let aimX = 0;
   const ray = new THREE.Raycaster();
-  const lanePlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -(BACK_WALL.frontZ + 1));
+  const lanePlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -LANES.frontZ);
   const hit = new THREE.Vector3();
   const aimFromPointer = (e: PointerEvent) => {
     const ndc = new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
     ray.setFromCamera(ndc, camera);
-    if (ray.ray.intersectPlane(lanePlane, hit)) aimX = Math.max(-FIELD.innerHalfWidth + 1.4, Math.min(FIELD.innerHalfWidth - 1.4, hit.x));
+    if (ray.ray.intersectPlane(lanePlane, hit)) aimX = Math.max(-FIELD.innerHalfWidth + 1.0, Math.min(FIELD.innerHalfWidth - 1.0, hit.x));
   };
   let downAt: { x: number; y: number } | null = null;
   canvasEl.addEventListener('pointerdown', (e) => {
@@ -247,8 +254,8 @@ async function main() {
     if (moved < 10 && !controls.enabled) feed();
   });
   addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowLeft') aimX = Math.max(-13.6, aimX - 1);
-    if (e.key === 'ArrowRight') aimX = Math.min(13.6, aimX + 1);
+    if (e.key === 'ArrowLeft') aimX = Math.max(-14, aimX - 1);
+    if (e.key === 'ArrowRight') aimX = Math.min(14, aimX + 1);
     if (e.key === ' ') feed();
   });
   const toast = document.getElementById('toast')!;
@@ -264,12 +271,14 @@ async function main() {
       showToast('手持ちのメダルがありません。「メダル補充」で借りられます');
       return;
     }
-    physics.feed(aimX + (Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 4);
+    physics.shoot(aimX, 0.35);
+    recoil = 1;
     game.fed();
     fed++;
   }
 
   const creditsEl = document.getElementById('credits')!;
+  let recoil = 0;
   let auto = false;
   let autoAcc = 0;
   let showHud = qs.get('hud') === '1' || qs.get('debug') === '1';
@@ -395,9 +404,17 @@ async function main() {
     // 演出
     const lit = checkerLaneAt(t);
     screen.setChecker(lit);
-    screen.update(now, game);
+    dungeon.update(game, t, dtFrame);
+    if (screen.update(now, game)) lcd.render(renderer);
     cabinet.checkerLamps.forEach((m, i) => m.color.setRGB(i === lit ? 4 : 0.35, i === lit ? 0.9 : 0.08, i === lit ? 0.3 : 0.05));
-    cabinet.aim.position.x += (aimX - cabinet.aim.position.x) * Math.min(1, dtFrame * 18);
+    // 発射台は狙いの穴を向く。撃つと砲身が少し下がる
+    cabinet.sight.position.x += (aimX - cabinet.sight.position.x) * Math.min(1, dtFrame * 20);
+    const dz = LANES.frontZ - (SHOOTER.z + 1.2);
+    cabinet.shooter.pivot.rotation.y = Math.atan2(-(cabinet.sight.position.x - SHOOTER.x), -dz);
+    cabinet.shooter.pivot.rotation.order = 'YXZ';
+    cabinet.shooter.pivot.rotation.x = 0.28;
+    recoil = Math.max(0, recoil - dtFrame * 6);
+    cabinet.shooter.barrel.position.z = recoil * 0.5;
     const pulse = 0.75 + 0.25 * Math.sin(t * 3);
     cabinet.lampTubes.color.setRGB(3.2 * pulse, 1.3 * pulse, 0.25 * pulse);
     cabinet.wheel.update(t, dtFrame);
@@ -431,7 +448,7 @@ async function main() {
   }
 
   // 検証用: ?debug=1 でコンソールから操作できるようにする
-  if (qs.get('debug') === '1') Object.assign(window, { dh: { get game() { return game; }, physics, cabinet } });
+  if (qs.get('debug') === '1') Object.assign(window, { dh: { get game() { return game; }, physics, cabinet, dungeon } });
 
   await physics.ready;
   document.getElementById('loading')!.classList.add('hidden');

@@ -22,7 +22,7 @@ for (let i = 0; i < steps; i++) {
   // 0.4 秒ごとに1枚投入
   if (i % Math.round(hz * 0.4) === 0) {
     x = ((drop++ * 7.3) % 24) - 12;
-    w.feedMedal(x, 0);
+    w.shootMedal(x, 0.4);
   }
   const s = performance.now();
   w.step();
