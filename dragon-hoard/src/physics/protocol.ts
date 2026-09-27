@@ -1,0 +1,34 @@
+import type { DropResult, ImpactEvent, PhysicsOptions } from './world.ts';
+
+export interface MedalSpawn {
+  x: number; y: number; z: number;
+  vx: number; vy: number; vz: number;
+  wx: number; wy: number; wz: number;
+}
+
+export type Command =
+  | { t: 'add'; m: MedalSpawn }
+  | { t: 'reset'; count: number; seed: number };
+
+export type ToWorker =
+  | { type: 'init'; capacity: number; opts: Partial<PhysicsOptions>; count: number; seed: number }
+  | { type: 'step'; steps: number; cmds: Command[] };
+
+export interface Snapshot {
+  count: number;
+  pos: Float32Array;
+  quat: Float32Array;
+  prevPos: Float32Array;
+  prevQuat: Float32Array;
+  pusherZ: number;
+  prevPusherZ: number;
+  steps: number;
+  stepMs: number; // このスナップショットでの1ステップ平均
+  awakeCount: number;
+  wins: number;
+  losses: number;
+  drops: { r: DropResult; x: number; z: number }[];
+  impacts: ImpactEvent[];
+}
+
+export type FromWorker = { type: 'ready'; snap: Snapshot } | { type: 'state'; snap: Snapshot };
