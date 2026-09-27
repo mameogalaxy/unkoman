@@ -70,6 +70,14 @@ export class PhysicsClient {
     this.cmds.push({ t: 'add', m });
   }
 
+  feed(x: number, spin: number) {
+    this.cmds.push({ t: 'feed', x, spin });
+  }
+
+  payout(count: number) {
+    this.cmds.push({ t: 'payout', count });
+  }
+
   reset(count: number, seed: number) {
     this.cmds.push({ t: 'reset', count, seed });
   }

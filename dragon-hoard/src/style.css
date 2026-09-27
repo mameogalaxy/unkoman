@@ -1,3 +1,10 @@
+/* 日本語の見出し用。scripts/subset-font.py で使う文字だけに絞ったもの（SIL OFL） */
+@font-face {
+  font-family: 'Zen Antique';
+  src: url('./assets/fonts/zen-antique-subset.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
 html, body {
   margin: 0;
   height: 100%;

@@ -4,7 +4,7 @@ import * as THREE from 'three';
 
 type Ctx = CanvasRenderingContext2D;
 
-function drawDragon(ctx: Ctx, S: number) {
+export function drawDragon(ctx: Ctx, S: number) {
   const c = S / 2;
   const R = S * 0.5;
   const P = (r: number, a: number): [number, number] => [c + Math.cos(a) * r * R, c + Math.sin(a) * r * R];

@@ -93,6 +93,12 @@ export class Sfx {
     }
   }
 
+  /** チェッカー当たり（仮の合成音: 上昇する3音） */
+  checker() {
+    if (!this.clinks.length) return;
+    [0, 90, 180].forEach((ms, k) => setTimeout(() => this.play(this.clinks[k % 3], 0.7, 1.0 + k * 0.26, 0), ms));
+  }
+
   lose(x: number) {
     if (this.thud) this.play(this.thud, 0.35, 1, x / 16);
   }

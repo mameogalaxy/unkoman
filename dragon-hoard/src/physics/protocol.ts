@@ -8,6 +8,8 @@ export interface MedalSpawn {
 
 export type Command =
   | { t: 'add'; m: MedalSpawn }
+  | { t: 'feed'; x: number; spin: number }
+  | { t: 'payout'; count: number }
   | { t: 'reset'; count: number; seed: number };
 
 export type ToWorker =
@@ -29,6 +31,9 @@ export interface Snapshot {
   losses: number;
   drops: { r: DropResult; x: number; z: number }[];
   impacts: ImpactEvent[];
+  /** 通過したレーン番号（チェッカー） */
+  laneHits: number[];
+  payoutQueue: number;
 }
 
 export type FromWorker = { type: 'ready'; snap: Snapshot } | { type: 'state'; snap: Snapshot };

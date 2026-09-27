@@ -37,3 +37,34 @@ export const BACK_WALL = {
 
 // これより下に落ちたメダルは判定して削除する
 export const KILL_Y = -4;
+
+// 画面の下のレーン（チェッカー）。奥壁の前に銀の仕切りが並び、メダルはこの間を縦に落ちて上段へ入る。
+export const LANES = {
+  count: 8,
+  frontZ: BACK_WALL.frontZ + 1.5, // 仕切りの手前端
+  bottomY: 4.7, // 仕切りの下端（上段のメダルの山より上）
+  topY: 9.6,
+  fingerThickness: 0.36,
+  sensorY: 5.4, // この高さを通過したら「レーン通過」
+  feedY: 10.6, // 投入口の高さ
+} as const;
+
+export function laneCenterX(i: number) {
+  const w = (FIELD.innerHalfWidth * 2) / LANES.count;
+  return -FIELD.innerHalfWidth + w * (i + 0.5);
+}
+
+// 奥壁 = 液晶画面
+export const SCREEN = {
+  width: 30,
+  height: 22.5,
+  bottomY: 11.6,
+  z: BACK_WALL.frontZ - 0.05,
+} as const;
+
+// 左奥のホッパー（竜の口）。払い出しメダルはここから勢いよく飛び出す
+export const HOPPER = {
+  x: -FIELD.innerHalfWidth + 0.9,
+  y: 12.2,
+  z: BACK_WALL.frontZ + 4.2,
+} as const;

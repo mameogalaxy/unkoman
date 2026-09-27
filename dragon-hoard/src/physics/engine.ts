@@ -17,6 +17,7 @@ export class Engine {
     seedField(w, count, seed);
     settle(w, 1.2);
     this.drops.length = 0;
+    w.laneHits.length = 0;
     return w;
   }
 
@@ -25,6 +26,10 @@ export class Engine {
       if (c.t === 'add') {
         const m = c.m;
         this.w.addMedal(m.x, m.y, m.z, undefined, { x: m.vx, y: m.vy, z: m.vz }, { x: m.wx, y: m.wy, z: m.wz });
+      } else if (c.t === 'feed') {
+        this.w.feedMedal(c.x, c.spin);
+      } else if (c.t === 'payout') {
+        this.w.payoutQueue += c.count;
       } else if (c.t === 'reset') {
         const { capacity, opts } = this.w;
         this.w.world.free();
@@ -58,7 +63,10 @@ export class Engine {
       losses: w.stats.losses,
       drops: this.drops,
       impacts: w.impacts.slice(),
+      laneHits: w.laneHits.slice(),
+      payoutQueue: w.payoutQueue,
     };
+    w.laneHits.length = 0;
     this.drops = [];
     w.impacts.length = 0;
     return snap;

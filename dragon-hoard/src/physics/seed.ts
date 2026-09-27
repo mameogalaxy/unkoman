@@ -45,7 +45,7 @@ export function seedField(w: MedalWorld, n: number, seed = 1) {
     }
   }
   // 上段
-  for (let layer = 0; layer < 5; layer++) {
+  for (let layer = 0; layer < 3; layer++) {
     const y0 = PUSHER.height + MEDAL.halfThickness + 0.05 + layer * 0.6;
     let row = 0;
     for (let z = pusherFront - r - 0.3; z > BACK_WALL.frontZ + r + 0.2; z -= sp * 0.866, row++) {
