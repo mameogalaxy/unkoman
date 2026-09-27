@@ -10,7 +10,7 @@ import { GiantWheel } from './wheel.ts';
 
 /** 八角形の中心（中央の塔の位置） */
 export const TOWER_CENTER = new THREE.Vector3(0, 0, -86); // 幅42のステーション8台が重ならない距離
-export const WHEEL_POS = new THREE.Vector3(0, 76, -60); // 頭上のジャックポットスロットより上
+export const WHEEL_POS = new THREE.Vector3(0, 66, -58);
 export const WHEEL_RADIUS = 17;
 
 export interface Cabinet {
